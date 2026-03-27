@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SATELLITE UPLINK</title>
+    <style>
+        body { background: #0a0c0a; color: #52ff52; font-family: 'Courier New', monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; text-shadow: 0 0 5px #004400; }
+        .screen { width: 512px; height: 512px; border: 4px solid #1a1a1a; position: relative; background: #020502; box-shadow: inset 0 0 50px #000, 0 0 20px rgba(82, 255, 82, 0.2); border-radius: 5px; overflow: hidden; }
+        #blueprint { width: 100%; height: 100%; opacity: 0.8; }
+        .part { fill: none; stroke: #52ff52; stroke-width: 1.5; }
+        #scanner-view { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; image-rendering: pixelated; }
+        #earth-canvas { width: 100%; height: 100%; filter: contrast(1.2) brightness(1.1); }
+        
+        /* KSP UI Elements */
+        .ksp-ui { position: absolute; padding: 10px; font-size: 11px; width: 100%; box-sizing: border-box; pointer-events: none; }
+        .top-left { top: 0; left: 0; border-bottom: 1px solid rgba(82,255,82,0.3); background: rgba(0,0,0,0.5); }
+        .bottom-right { bottom: 0; right: 0; text-align: right; }
+        
+        /* Sweep Line */
+        .sweep { position: absolute; width: 100%; height: 2px; background: rgba(82, 255, 82, 0.5); box-shadow: 0 0 10px #52ff52; top: 0; animation: scan 1s linear infinite; display: none; }
+        @keyframes scan { from { top: 0%; } to { top: 100%; } }
+
+        .controls { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 512px; }
+        button { background: #1a1a1a; color: #52ff52; border: 1px solid #52ff52; padding: 12px; cursor: pointer; font-weight: bold; font-size: 12px; transition: 0.2s; }
+        button:hover { background: #52ff52; color: #000; }
+        .slider-wrap { grid-column: span 2; display: flex; align-items: center; gap: 10px; background: #111; padding: 10px; border: 1px solid #333; }
+        input[type=range] { flex-grow: 1; accent-color: #52ff52; }
+    </style>
+</head>
+<body>
+
+<div class="screen">
+    <!-- Part Blueprint -->
+    <svg id="blueprint" viewBox="0 0 600 400">
+        <rect class="part" x="270" y="170" width="60" height="60" />
+        <line class="part" x1="270" y1="185" x2="170" y2="185" />
+        <line class="part" x1="330" y1="185" x2="430" y2="185" />
+        <rect class="part" x="160" y="170" width="10" height="30" />
+        <rect class="part" x="430" y="170" width="10" height="30" />
+        <path class="part" d="M 285,170 L 300,140 L 315,170" />
+        <circle class="part" cx="300" cy="245" r="15" />
+    </svg>
+
+    <!-- KerbNet Scanner -->
+    <div id="scanner-view">
+        <canvas id="earth-canvas" width="256" height="256"></canvas>
+        <div class="sweep" id="sweep-line"></div>
+        <div class="ksp-ui top-left">
+            MODE: TERRAIN SCAN (v1.12)<br>
+            RES: 420p (DENSE)<br>
+            TARGET: [CELESTIAL_BODY_01]
+        </div>
+        <div class="ksp-ui bottom-right">
+            ALT: 245,312m<br>
+            LAT: <span id="lat-val">0.00</span> | LON: <span id="lon-val">0.00</span>
+        </div>
+    </div>
+</div>
+
+<div class="controls">
+    <button onclick="toggleView()">VIEW</button>
+    <button onclick="switchOrbit()">ORBIT: <span id="orbit-name">EQUATORIAL</span></button>
+    <div class="slider-wrap">
+        <span>FOV 20°</span>
+        <input type="range" id="fov-slider" min="20" max="82" value="82" oninput="fov = this.value">
+        <span>82°</span>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('earth-canvas');
+    const ctx = canvas.getContext('2d');
+    let isScanner = false, orbit = 'equatorial', fov = 82;
+    let time = 0;
+
+    function toggleView() {
+        isScanner = !isScanner;
+        document.getElementById('blueprint').style.display = isScanner ? 'none' : 'block';
+        document.getElementById('scanner-view').style.display = isScanner ? 'block' : 'none';
+        document.getElementById('sweep-line').style.display = isScanner ? 'block' : 'none';
+    }
+
+    function switchOrbit() {
+        orbit = orbit === 'equatorial' ? 'polar' : 'equatorial';
+        document.getElementById('orbit-name').innerText = orbit.toUpperCase();
+    }
+
+    // Procedural Kerbal Terrain
+    function getTerrainColor(x, y) {
+        let val = 0;
+        let scale = 0.04;
+        for(let i=1; i<=5; i++) {
+            val += (Math.sin(x * scale) * Math.cos(y * scale)) / i;
+            scale *= 2.2;
+        }
+        
+        if (val > 0.3) return "#8aff8a"; // High terrain
+        if (val > 0.05) return "#32cc32"; // Plains
+        if (val > -0.1) return "#1b661b"; // Lowlands
+        return "#051a05"; // Deep Ocean
+    }
+
+    function draw() {
+        if (!isScanner) return;
+        
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, 256, 256);
+
+        const radius = (82 / fov) * 115;
+        time += 1.5;
+
+        // Update UI
+        document.getElementById('lat-val').innerText = (Math.sin(time/20)*90).toFixed(4);
+        document.getElementById('lon-val').innerText = ((time*10)%360-180).toFixed(4);
+
+        for (let y = 0; y < 256; y += 2) {
+            for (let x = 0; x < 256; x += 2) {
+                const dx = x - 128;
+                const dy = y - 128;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+
+                if (dist < radius) {
+                    let u = Math.asin(dx/radius) * 30;
+                    let v = Math.asin(dy/radius) * 30;
+                    
+                    if (orbit === 'equatorial') u += time; else v += time;
+
+                    ctx.fillStyle = getTerrainColor(u, v);
+                    ctx.fillRect(x, y, 2, 2);
+                }
+            }
+        }
+        
+        // Add random digital noise/static
+        for(let i=0; i<100; i++) {
+            ctx.fillStyle = "rgba(82, 255, 82, 0.1)";
+            ctx.fillRect(Math.random()*256, Math.random()*256, 1, 1);
+        }
+    }
+
+    // The 1-second refresh rate
+    setInterval(draw, 1000);
+</script>
+</body>
+</html>
