@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>ALEX ORBITER</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #050510; color: white; font-family: Arial; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 15px; left: 20px; font-size: 24px; pointer-events: none; }
+        #startScreen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: black; display: flex; align-items: center; justify-content: center; font-size: 40px; cursor: pointer; z-index: 10; text-align: center; }
+        #gameOver { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 50px; text-align: center; display: none; background: rgba(0,0,0,0.8); padding: 20px; border-radius: 10px; z-index: 20; }
+    </style>
+</head>
+<body>
+    <div id="startScreen">
+        ALEX ORBITER<br>
+        <span style="font-size: 20px;">[SPACE] Player 1 | [P] to Join | [UP] Player 2</span>
+    </div>
+    <div id="ui">Score: <span id="score">0</span></div>
+    <div id="gameOver"></div>
+    <canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+let centerX = canvas.width / 2;
+let centerY = canvas.height / 2;
+let asteroids = [];
+let particles = [];
+let score = 0;
+let running = false;
+let lastSpawnTime = 0;
+
+const alex = new Image();
+alex.src = "ALEX.png";
+
+const p1 = {
+    active: true,
+    dead: false,
+    radius: 180,
+    angle: 0,
+    dir: 1,
+    color: "#58d0ff",
+    x: 0, y: 0,
+    vx: 0, vy: 0,
+    dying: false
+};
+
+const p2 = {
+    active: false,
+    dead: false,
+    radius: 280,
+    angle: Math.PI, 
+    dir: 1,
+    color: "#ff58eb",
+    x: 0, y: 0,
+    vx: 0, vy: 0,
+    dying: false
+};
+
+document.addEventListener("keydown", e => {
+    if (e.code === "Space") p1.dir *= -1;
+    if (e.code === "KeyP" && !p2.active) p2.active = true;
+    if (e.code === "ArrowUp") p2.dir *= -1;
+});
+
+function spawnAsteroid() {
+    let edge = Math.floor(Math.random() * 4);
+    let x, y;
+    if (edge === 0) { x = 0; y = Math.random() * canvas.height; }
+    else if (edge === 1) { x = canvas.width; y = Math.random() * canvas.height; }
+    else if (edge === 2) { x = Math.random() * canvas.width; y = 0; }
+    else { x = Math.random() * canvas.width; y = canvas.height; }
+
+    let ang = Math.atan2(centerY - y, centerX - x);
+    
+    // --- DIFFICULTY SCALING RESTORED ---
+    let difficultyBoost = score / 800;
+    let typeRand = Math.random();
+    let size, speedMult, color;
+
+    if (typeRand < 0.2) { // Small and FAST
+        size = 10;
+        speedMult = 2.2;
+        color = "#ff5858"; 
+    } else if (typeRand > 0.8) { // Large and SLOW
+        size = 35;
+        speedMult = 0.6;
+        color = "#555"; 
+    } else { // Standard
+        size = 18;
+        speedMult = 1.0;
+        color = "#888";
+    }
+
+    let finalSpeed = (4 + difficultyBoost) * speedMult;
+
+    asteroids.push({
+        x, y, 
+        vx: Math.cos(ang) * finalSpeed, 
+        vy: Math.sin(ang) * finalSpeed, 
+        size, color 
+    });
+}
+
+function explosion(x, y, color) {
+    for (let i = 0; i < 15; i++) {
+        particles.push({
+            x, y, 
+            vx: (Math.random() - 0.5) * 10, 
+            vy: (Math.random() - 0.5) * 10, 
+            life: 30, color: color || "orange"
+        });
+    }
+}
+
+function updatePlayer(p) {
+    if (p.dying) {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (Math.hypot(centerX - p.x, centerY - p.y) < 60) {
+            explosion(p.x, p.y, p.color);
+            p.dying = false;
+            p.dead = true;
+        }
+        return;
+    }
+    if (p.dead) return;
+
+    let rotationSpeed = 0.04 + (score / 15000);
+    p.angle += rotationSpeed * p.dir;
+    p.x = centerX + Math.cos(p.angle) * p.radius;
+    p.y = centerY + Math.sin(p.angle) * p.radius;
+}
+
+function update() {
+    updatePlayer(p1);
+    if (p2.active) updatePlayer(p2);
+
+    let spawnInterval = Math.max(150, 1100 - (score / 4));
+    if (Date.now() - lastSpawnTime > spawnInterval) {
+        spawnAsteroid();
+        lastSpawnTime = Date.now();
+    }
+
+    for (let i = asteroids.length - 1; i >= 0; i--) {
+        let a = asteroids[i];
+        
+        // Gravity attraction near center
+        let distToCenter = Math.hypot(centerX - a.x, centerY - a.y);
+        if (distToCenter < 350) {
+            a.vx *= 1.015;
+            a.vy *= 1.015;
+        }
+        
+        a.x += a.vx; a.y += a.vy;
+
+        [p1, p2].forEach(p => {
+            if (p.active && !p.dead && !p.dying) {
+                if (Math.hypot(p.x - a.x, p.y - a.y) < a.size + 10) {
+                    p.dying = true;
+                    let ang = Math.atan2(centerY - p.y, centerX - p.x);
+                    p.vx = Math.cos(ang) * 14; // Fly fast into Alex
+                    p.vy = Math.sin(ang) * 14;
+                    explosion(p.x, p.y, p.color);
+                }
+            }
+        });
+
+        if (distToCenter < 90) {
+            explosion(a.x, a.y, a.color);
+            asteroids.splice(i, 1);
+            score += 10;
+        } else if (a.x < -100 || a.x > canvas.width + 100 || a.y < -100 || a.y > canvas.height + 100) {
+            asteroids.splice(i, 1);
+        }
+    }
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+        particles[i].x += particles[i].vx;
+        particles[i].y += particles[i].vy;
+        particles[i].life--;
+        if (particles[i].life <= 0) particles.splice(i, 1);
+    }
+
+    let p1Lost = p1.dead;
+    let p2Lost = !p2.active || p2.dead;
+    if (p1Lost && p2Lost) setTimeout(gameOver, 500);
+
+    score += 0.5;
+    document.getElementById("score").textContent = Math.floor(score);
+}
+
+function drawPlayer(p) {
+    if (!p.active || p.dead) return;
+    ctx.fillStyle = p.color;
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+}
+
+function draw() {
+    ctx.fillStyle = "#050510";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Neon Orbit Lines
+    ctx.lineWidth = 2;
+    
+    // P1 Neon Orbit
+    ctx.strokeStyle = p1.color;
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = p1.color;
+    ctx.globalAlpha = 0.4;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, p1.radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // P2 Neon Orbit
+    if (p2.active) {
+        ctx.strokeStyle = p2.color;
+        ctx.shadowColor = p2.color;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, p2.radius, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+    
+    ctx.globalAlpha = 1.0;
+    ctx.shadowBlur = 0;
+
+    ctx.drawImage(alex, centerX - 120, centerY - 120, 240, 240);
+
+    asteroids.forEach(a => {
+        ctx.fillStyle = a.color;
+        ctx.beginPath(); ctx.arc(a.x, a.y, a.size, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.3)";
+        ctx.stroke();
+    });
+
+    particles.forEach(p => {
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.life / 30;
+        ctx.fillRect(p.x, p.y, 3, 3);
+        ctx.globalAlpha = 1;
+    });
+
+    drawPlayer(p1);
+    drawPlayer(p2);
+}
+
+function gameOver() {
+    if (!running) return;
+    running = false;
+    const go = document.getElementById("gameOver");
+    go.style.display = "block";
+    go.innerHTML = `GAME OVER<br><span style="font-size:30px">Score: ${Math.floor(score)}</span><br><br><span style="font-size:20px">Click to Restart</span>`;
+    go.onclick = () => location.reload();
+}
+
+function loop() {
+    if (running) { update(); draw(); }
+    requestAnimationFrame(loop);
+}
+
+document.getElementById("startScreen").onclick = () => {
+    document.getElementById("startScreen").style.display = "none";
+    running = true;
+    lastSpawnTime = Date.now();
+    loop();
+};
+
+window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    centerX = canvas.width / 2;
+    centerY = canvas.height / 2;
+});
+</script>
+</body>
+</html>

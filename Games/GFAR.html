@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Get fat and Roll</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Arial Black', sans-serif; }
+        canvas { display: block; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #fff; pointer-events: none; z-index: 10; }
+        .stat { font-size: 18px; background: rgba(0,0,0,0.8); padding: 8px; margin-bottom: 5px; border: 2px solid #e74c3c; border-radius: 5px; }
+        #wanted { font-size: 35px; color: #f1c40f; text-shadow: 2px 2px #000; letter-spacing: 5px; }
+        #shop-menu { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #111; border: 4px solid #f1c40f; padding: 20px; z-index: 200; color: white; border-radius: 15px; width: 420px; height: 500px; overflow-y: scroll; pointer-events: auto; }
+        .shop-item { background: #222; border: 1px solid #444; padding: 10px; margin: 5px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-radius: 5px; }
+        .shop-item:hover { background: #333; border-color: #f1c40f; }
+        .locked { background: #111 !important; color: #555 !important; border: 1px solid #222 !important; cursor: not-allowed !important; opacity: 0.5; }
+        #results { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 40px; border: 10px solid black; text-align: center; z-index: 101; border-radius: 20px; }
+        button { padding: 12px 24px; font-weight: bold; cursor: pointer; background: #3498db; color: white; border: none; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div class="stat">WEIGHT: <span id="weight">10</span> lbs</div>
+    <div class="stat">BANKED PTS: <span id="pts">0</span></div>
+    <div id="wanted">☆☆☆☆☆</div>
+    <div class="stat" style="color:#f1c40f; font-size: 12px;">T: SHOP | SPACE: ROLL | W: SLAM | K: SAVE | L: LOAD</div>
+</div>
+
+<div id="shop-menu">
+    <h2 style="text-align:center; color:#f1c40f; margin-top:0;">🍕 THE FAT MARKET 🍗</h2>
+    <div id="food-list"></div>
+    <button onclick="toggleShop()" style="width:100%; background:#e74c3c; margin-top:10px;">BACK TO FEEDING</button>
+</div>
+
+<div id="results">
+    <h1>CITY EXTINCT</h1>
+    <h2 id="final-score">0</h2>
+    <button onclick="resetGame()">CONTINUE FEEDING</button>
+</div>
+
+<input type="file" id="fileInput" style="display:none" onchange="loadFromFile(event)" accept=".json">
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const weightEl = document.getElementById('weight');
+const ptsEl = document.getElementById('pts');
+const wantedEl = document.getElementById('wanted');
+const shopEl = document.getElementById('shop-menu');
+const foodList = document.getElementById('food-list');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+let alexImg = new Image(); alexImg.src = 'ALEX.png';
+let state = 'EATING', weight = 10, points = 0, currentFoodVal = 20;
+let player = { x: 200, y: 0, v: 0, rot: 0, vx: 0, vy: 0, isSlamming: false };
+let cam = { x: 0, y: 0 }, screenShake = 0, shockwave = 0, gameActive = true;
+let buildings = [], particles = [], cops = [], stars = [];
+
+const foods = [
+    {n: "Cold Fry", c: 0, w: 20}, {n: "Nugget", c: 150, w: 40}, {n: "Slider", c: 2500, w: 75}, 
+    {n: "Hot Dog", c: 13000, w: 120}, {n: "Taco", c: 44000, w: 175}, {n: "Soda Tank", c: 110000, w: 250},
+    {n: "Donut Stack", c: 232000, w: 350}, {n: "Pizza Box", c: 437000, w: 500}, {n: "Double Burger", c: 756000, w: 700},
+    {n: "Bucket Wings", c: 1225000, w: 1000}, {n: "Lard Block", c: 1888000, w: 1500}, {n: "Cake", c: 2791000, w: 2000},
+    {n: "Party Sub", c: 3987000, w: 3000}, {n: "Oil Shake", c: 5536000, w: 4500}, {n: "Mega Burger", c: 7502000, w: 6000}
+];
+
+for(let i=0; i<150; i++) stars.push({x: Math.random()*canvas.width, y: Math.random()*canvas.height, s: Math.random()*2.5});
+
+function saveToFile() {
+    const data = { points, currentFoodVal };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'fat_roll_save.json'; a.click();
+}
+
+function loadFromFile(event) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const data = JSON.parse(e.target.result);
+        points = data.points || 0; currentFoodVal = data.currentFoodVal || 20;
+        ptsEl.innerText = points.toLocaleString();
+    };
+    reader.readAsText(event.target.files[0]);
+}
+
+function initShop() {
+    foodList.innerHTML = "";
+    foods.forEach((f) => {
+        let isLocked = points < f.c;
+        let item = document.createElement('div');
+        item.className = `shop-item ${isLocked ? 'locked' : ''}`;
+        item.innerHTML = `<span>${f.n} (+${f.w})</span> <span>${f.c.toLocaleString()}</span>`;
+        if (!isLocked) item.onclick = () => { currentFoodVal = f.w; points -= f.c; ptsEl.innerText = points.toLocaleString(); toggleShop(); };
+        foodList.appendChild(item);
+    });
+}
+
+function toggleShop() { if(state === 'EATING') { shopEl.style.display = (shopEl.style.display==='block'?'none':'block'); if(shopEl.style.display==='block') initShop(); } }
+
+function spawnCity() {
+    buildings = []; cops = [];
+    for(let i=0; i<1000; i++) {
+        buildings.push({ x: 20000 + (i * 450), w: 150 + Math.random()*150, h: 250 + Math.random()*1000, color: `hsl(${Math.random()*360}, 25%, 35%)`, destroyed: false });
+        if(Math.random() > 0.75) cops.push({ x: 20500 + (i * 450), vx: -12, destroyed: false });
+    }
+}
+
+function spawnParticles(x, y, color, amount = 20, speed = 25, bounce = true) {
+    for(let i=0; i<amount; i++) {
+        particles.push({ x, y, vx: (Math.random()-0.5)*speed, vy: (Math.random()-0.5)*speed, life: 1, size: Math.random()*10+2, color, bounce });
+    }
+}
+
+function resetGame() {
+    document.getElementById('results').style.display = 'none';
+    state = 'EATING'; weight = 10;
+    player = { x: 200, y: 0, v: 0, rot: 0, vx: 0, vy: 0, isSlamming: false };
+    particles = []; shockwave = 0;
+    if(!gameActive) { gameActive = true; update(); } // Restart the loop if it stopped
+}
+
+function update() {
+    if (!gameActive) return;
+
+    ctx.save();
+    if(screenShake > 0) { ctx.translate(Math.random()*screenShake - screenShake/2, Math.random()*screenShake - screenShake/2); screenShake *= 0.9; }
+    ctx.fillStyle = "#000"; ctx.fillRect(0,0, canvas.width, canvas.height);
+    ctx.fillStyle = "#fff"; stars.forEach(s => ctx.fillRect(s.x, s.y, s.s, s.s));
+
+    let size = 20 + Math.sqrt(weight) * 3;
+
+    if (state === 'EATING') {
+        ctx.fillStyle = "#222"; ctx.fillRect(0, canvas.height-100, canvas.width, 20);
+        player.y = canvas.height - 100 - size;
+        if(Math.random() < 0.1 && shopEl.style.display !== 'block') { 
+            weight += currentFoodVal; weightEl.innerText = Math.floor(weight);
+            spawnParticles(player.x, player.y + size/2, `hsl(${Math.random()*50+20}, 70%, 50%)`, 3, 5, false);
+        }
+    } else {
+        cam.x = player.x - canvas.width / 3; cam.y = player.y - canvas.height / 2;
+        ctx.translate(-cam.x, -cam.y);
+
+        if(state === 'ROLLING') {
+            ctx.fillStyle = "#111"; ctx.beginPath(); ctx.moveTo(0, 200); ctx.lineTo(18000, 18200); ctx.lineTo(19500, 19500); ctx.lineTo(19500, 40000); ctx.lineTo(0, 40000); ctx.fill();
+            player.v += 0.55; player.x += player.v; player.y = player.x + 200 - size; player.rot += player.v/10;
+            if (player.x > 19000) { state = 'JUMPING'; player.vx = player.v * 1.35; player.vy = -player.v * 1.6; spawnCity(); }
+        } else {
+            ctx.fillStyle = "#050505"; ctx.fillRect(cam.x, canvas.height-50, canvas.width * 1000, 2000);
+            player.x += player.vx; player.y += player.vy; player.vy += 2.0;
+            if(player.y + size > canvas.height-50) {
+                player.y = canvas.height-50-size;
+                if(state === 'JUMPING' || player.isSlamming) { state = 'CRASHING'; screenShake = weight/1.8; shockwave = 100; spawnParticles(player.x, player.y + size, "#fff", 60, 45); }
+                player.vx *= 0.998; player.vy = 0; player.isSlamming = false;
+            }
+
+            wantedEl.innerText = "★".repeat(Math.min(5, Math.floor(points / 10000))) + "☆".repeat(5 - Math.min(5, Math.floor(points / 10000)));
+
+            buildings.forEach(b => {
+                if(!b.destroyed && Math.abs(player.x - b.x) < 1500) {
+                    ctx.fillStyle = b.color; ctx.fillRect(b.x, canvas.height-50-b.h, b.w, b.h);
+                    if(player.x + size > b.x && player.x - size < b.x+b.w && player.y+size > canvas.height-50-b.h) {
+                        b.destroyed = true; points += Math.floor(b.h);
+                        player.vx -= (b.h / weight) * 4.8; screenShake += (player.isSlamming ? 40 : 12);
+                        spawnParticles(b.x + b.w/2, player.y + size, b.color, 30, 25);
+                    }
+                }
+            });
+            cops.forEach(c => {
+                if(!c.destroyed) {
+                    c.x += c.vx; ctx.fillStyle = "#fff"; ctx.fillRect(c.x, canvas.height-75, 65, 28);
+                    if(Math.abs(player.x - c.x) < size + 35 && player.y + size > canvas.height-80) {
+                        c.destroyed = true; points += 5000; player.vx -= (1200 / weight); spawnParticles(c.x, canvas.height-60, "white", 40, 35);
+                    }
+                }
+            });
+        }
+        player.rot += player.vx / 22;
+    }
+
+    if(shockwave > 0) {
+        ctx.strokeStyle = `rgba(255,255,255,${shockwave/100})`; ctx.lineWidth = 10;
+        ctx.beginPath(); ctx.arc(player.x, canvas.height-50, shockwave*8, 0, Math.PI, true); ctx.stroke(); shockwave -= 2;
+    }
+
+    particles.forEach((p, i) => {
+        p.x += p.vx; p.y += p.vy; p.vy += 0.6; p.life -= 0.02;
+        if(p.bounce && p.y > canvas.height-50) { p.vy *= -0.5; p.y = canvas.height-50; } 
+        ctx.globalAlpha = p.life; ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.size, p.size);
+        if(p.life <= 0) particles.splice(i, 1);
+    });
+    ctx.globalAlpha = 1.0; ptsEl.innerText = points.toLocaleString();
+
+    ctx.save(); ctx.translate(player.x, player.y + size); ctx.rotate(player.rot);
+    if(player.isSlamming) { ctx.shadowBlur = 80; ctx.shadowColor = "#0ff"; }
+    try { ctx.drawImage(alexImg, -size, -size, size*2, size*2); } catch(e) { ctx.fillStyle="orange"; ctx.beginPath(); ctx.arc(0,0,size,0,Math.PI*2); ctx.fill(); }
+    ctx.restore(); ctx.restore();
+
+    if(state === 'CRASHING' && player.vx < 0.6) {
+        gameActive = false; // Stop loop
+        document.getElementById('results').style.display = 'block';
+        document.getElementById('final-score').innerText = `TOTAL DAMAGE: ${points.toLocaleString()}`;
+    } else {
+        requestAnimationFrame(update);
+    }
+}
+
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyT') toggleShop();
+    if (e.code === 'KeyW' && state === 'JUMPING') { player.vy = 130; player.isSlamming = true; spawnParticles(player.x, player.y, "cyan", 20, 15, false); }
+    if (e.code === 'Space' && state === 'EATING') state = 'ROLLING';
+    if (e.code === 'KeyK') saveToFile();
+    if (e.code === 'KeyL') document.getElementById('fileInput').click();
+});
+
+update();
+</script>
+</body>
+</html>

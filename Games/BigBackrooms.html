@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Neocities Backrooms</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', Courier, monospace; }
+        #ui { position: fixed; top: 20px; left: 20px; color: #f1f100; z-index: 10; pointer-events: none; text-shadow: 2px 2px #000; }
+        #gameover { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 50px; color: red; display: none; text-align: center; z-index: 20; background: rgba(0,0,0,0.8); padding: 20px; border: 2px solid red; }
+    </style>
+</head>
+<body>
+    <div id="ui"> [ STATUS: LOST ]<br>CLICK TO INITIALIZE | WASD TO MOVE</div>
+    <div id="gameover">ENTITY DETECTED<br>YOU ARE GONE.</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com",
+                "three/addons/": "https://unpkg.com"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a05);
+        scene.fog = new THREE.FogExp2(0x1a1a00, 0.18);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new PointerLockControls(camera, document.body);
+        document.body.addEventListener('click', () => controls.lock());
+
+        // --- LIGHTING ---
+        const ambient = new THREE.AmbientLight(0xffffff, 0.1); 
+        scene.add(ambient);
+
+        const flashlight = new THREE.SpotLight(0xffffee, 30, 15, Math.PI/6, 0.3);
+        camera.add(flashlight);
+        flashlight.position.set(0, 0, 0);
+        flashlight.target.position.set(0, 0, -1);
+        camera.add(flashlight.target);
+        scene.add(camera);
+
+        // --- MAZE GENERATION ---
+        const walls = [];
+        const ceilingLights = [];
+        const mapSize = 20;
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0xc2b280 }); // Tan/Yellow
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x3d3622 }); // Brown
+
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        scene.add(floor);
+
+        for (let x = 0; x < mapSize; x++) {
+            for (let z = 0; z < mapSize; z++) {
+                const px = x - mapSize/2;
+                const pz = z - mapSize/2;
+
+                // Safe spawn area (don't put walls where player starts)
+                if (Math.abs(px) < 2 && Math.abs(pz) < 2) continue;
+
+                if (Math.random() < 0.15 || x === 0 || z === 0 || x === mapSize-1 || z === mapSize-1) {
+                    const wall = new THREE.Mesh(new THREE.BoxGeometry(1, 3.5, 1), wallMat);
+                    wall.position.set(px, 1.75, pz);
+                    scene.add(wall);
+                    walls.push(wall);
+                } else if (Math.random() < 0.05) {
+                    const l = new THREE.PointLight(0xffffaa, 10, 8);
+                    l.position.set(px, 3, pz);
+                    scene.add(l);
+                    ceilingLights.push(l);
+                }
+            }
+        }
+
+        // --- MOVEMENT & COLLISION ---
+        let keys = {};
+        document.addEventListener('keydown', (e) => keys[e.code] = true);
+        document.addEventListener('keyup', (e) => keys[e.code] = false);
+
+        function checkWall(pos) {
+            const r = 0.35;
+            for (let w of walls) {
+                if (Math.abs(pos.x - w.position.x) < 0.5 + r && Math.abs(pos.z - w.position.z) < 0.5 + r) return true;
+            }
+            return false;
+        }
+
+        function update() {
+            if (controls.isLocked) {
+                const speed = 0.07;
+                const dir = new THREE.Vector3();
+                camera.getWorldDirection(dir);
+                dir.y = 0; dir.normalize();
+                const side = new THREE.Vector3().crossVectors(camera.up, dir).normalize();
+
+                let next = camera.position.clone();
+                if (keys['KeyW']) next.addScaledVector(dir, speed);
+                if (keys['KeyS']) next.addScaledVector(dir, -speed);
+                if (keys['KeyA']) next.addScaledVector(side, speed);
+                if (keys['KeyD']) next.addScaledVector(side, -speed);
+
+                if (!checkWall(next)) camera.position.copy(next);
+
+                // Flicker
+                ceilingLights.forEach(l => { if(Math.random() > 0.98) l.intensity = Math.random() * 12; });
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            update();
+            renderer.render(scene, camera);
+        }
+
+        camera.position.set(0, 1.6, 0);
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

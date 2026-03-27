@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeltaMath Portal</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f0f2f5; }
+        .video-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 10000; pointer-events: none; overflow: hidden; }
+        .video-overlay video { width: 100%; height: 100%; object-fit: cover; opacity: 0.4; }
+        #click-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.9); color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; cursor: pointer; }
+        .card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; max-width: 400px; position: relative; z-index: 2000; }
+        h1 { color: #333; margin-bottom: 10px; }
+        p { color: #666; margin-bottom: 25px; line-height: 1.5; }
+        .btn { display: inline-block; padding: 12px 30px; background-color: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: background 0.3s; margin-bottom: 20px; }
+        .btn:hover { background-color: #0056b3; }
+        .control-container { margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px; }
+        label { font-size: 14px; color: #666; display: block; margin-bottom: 5px; }
+        input[type=range] { width: 100%; cursor: pointer; margin-bottom: 10px; }
+        .reverse-btn { background: #6c757d; border: none; color: white; padding: 5px 10px; border-radius: 4px; cursor: pointer; width: 100%; font-size: 12px; }
+        .reverse-active { background: #dc3545; }
+    </style>
+</head>
+<body>
+
+<div class="video-overlay">
+    <video id="bgVideo" autoplay muted playsinline preload="auto">
+        <source src="https://files.catbox.moe/81yi7z.mp4" type="video/mp4">
+    </video>
+</div>
+
+<div id="click-overlay">
+    <h1>DeltaMath Portal</h1>
+    <p>Click anywhere to start</p>
+</div>
+
+<div class="card">
+    <h1>DeltaMath Portal</h1>
+    <p>For security, DeltaMath must be opened in its own window.</p>
+    <a href="https://www.deltamath.com" target="_blank" class="btn">Launch DeltaMath</a>
+    
+    <div class="control-container">
+        <label for="volume-slider">Music Volume</label>
+        <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1">
+        
+        <label for="speed-slider">Playback Speed: <span id="speed-val">1</span>x</label>
+        <input type="range" id="speed-slider" min="0.1" max="5" step="0.01" value="1">
+        
+        <button id="reverse-toggle" class="reverse-btn">Reverse: OFF</button>
+    </div>
+</div>
+
+<script>
+    const videoPlaylist = [
+        "https://files.catbox.moe/81yi7z.mp4",
+        "https://files.catbox.moe/qwcnsr.mp4",
+        "https://files.catbox.moe/k9d501.mp4",
+        "https://files.catbox.moe/5pl4g9.mp4"
+    ];
+    const audioPlaylist = [
+        "https://files.catbox.moe/netb3b",
+        "https://files.catbox.moe/vf4z9n",
+    ];
+
+    let currentVideo = 0;
+    let currentTrack = 0;
+    let isReverse = false;
+    let reverseInterval = null;
+
+    const bgVideo = document.getElementById('bgVideo');
+    const introSound = new Audio();
+    const overlay = document.getElementById('click-overlay');
+    const volumeSlider = document.getElementById('volume-slider');
+    const speedSlider = document.getElementById('speed-slider');
+    const speedValDisplay = document.getElementById('speed-val');
+    const reverseBtn = document.getElementById('reverse-toggle');
+
+    function playCurrentTrack() {
+        introSound.src = audioPlaylist[currentTrack];
+        introSound.volume = volumeSlider.value;
+        introSound.playbackRate = speedSlider.value;
+        if(!isReverse) introSound.play();
+    }
+
+    overlay.addEventListener('click', () => {
+        overlay.style.display = 'none';
+        playCurrentTrack();
+        bgVideo.play();
+    });
+
+    // Handle normal forward ending
+    bgVideo.addEventListener('ended', () => {
+        if (!isReverse) {
+            currentVideo = (currentVideo + 1) % videoPlaylist.length;
+            bgVideo.src = videoPlaylist[currentVideo];
+            bgVideo.play();
+        }
+    });
+
+    introSound.addEventListener('ended', () => {
+        if (!isReverse) {
+            currentTrack = (currentTrack + 1) % audioPlaylist.length;
+            playCurrentTrack();
+        }
+    });
+
+    // Speed Control
+    speedSlider.addEventListener('input', (e) => {
+        const val = e.target.value;
+        speedValDisplay.textContent = val;
+        introSound.playbackRate = val;
+        bgVideo.playbackRate = val;
+        // If speed changes while reversing, restart interval to match speed
+        if(isReverse) toggleReverse(true); 
+    });
+
+    // Volume Control
+    volumeSlider.addEventListener('input', (e) => {
+        introSound.volume = e.target.value;
+    });
+
+    // REVERSE LOGIC
+    reverseBtn.addEventListener('click', () => {
+        isReverse = !isReverse;
+        toggleReverse(isReverse);
+    });
+
+    function toggleReverse(enable) {
+        clearInterval(reverseInterval);
+        if (enable) {
+            reverseBtn.textContent = "Reverse: ON";
+            reverseBtn.classList.add('reverse-active');
+            introSound.pause();
+            bgVideo.pause();
+
+            // Frequency of update (higher = smoother, but heavier)
+            const fps = 30; 
+            reverseInterval = setInterval(() => {
+                const step = (speedSlider.value / fps);
+                
+                // Backwards for Video
+                if (bgVideo.currentTime > 0.1) {
+                    bgVideo.currentTime -= step;
+                } else {
+                    // Loop to previous video if at start
+                    currentVideo = (currentVideo - 1 + videoPlaylist.length) % videoPlaylist.length;
+                    bgVideo.src = videoPlaylist[currentVideo];
+                    bgVideo.onloadedmetadata = () => bgVideo.currentTime = bgVideo.duration;
+                }
+
+                // Backwards for Audio
+                if (introSound.currentTime > 0.1) {
+                    introSound.currentTime -= step;
+                } else {
+                    // Loop to previous track if at start
+                    currentTrack = (currentTrack - 1 + audioPlaylist.length) % audioPlaylist.length;
+                    playCurrentTrack();
+                    introSound.onloadedmetadata = () => introSound.currentTime = introSound.duration;
+                }
+            }, 1000 / fps);
+        } else {
+            reverseBtn.textContent = "Reverse: OFF";
+            reverseBtn.classList.remove('reverse-active');
+            bgVideo.play();
+            introSound.play();
+        }
+    }
+</script>
+
+</body>
+</html>

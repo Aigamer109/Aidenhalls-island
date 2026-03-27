@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Grow a Garden Walk - Animated Plants</title>
+<style>
+body{margin:0;overflow:hidden;font-family:Arial;}
+canvas{display:block;background:#7bb56d;}
+#hotbar{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);display:flex;gap:5px;}
+.hotbar-slot{width:70px;height:50px;background:#ccc;border:2px solid #888;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:bold;cursor:pointer;font-size:12px;}
+.hotbar-slot.selected{border-color:red;}
+#coins{position:absolute;top:10px;left:10px;font-weight:bold;}
+#weather{position:absolute;top:10px;right:10px;font-weight:bold;}
+#shopMenu{position:absolute;top:100px;left:50%;transform:translateX(-50%);
+background:#fff;padding:10px;border:2px solid #000;display:none;z-index:10;width:300px;}
+#shopItems{max-height:400px;overflow-y:auto;}
+button{margin-left:5px;}
+#restockTimer{margin-top:10px;font-size:12px;font-weight:bold;}
+#saveLoad{position:absolute;top:50px;left:10px;}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="hotbar"></div>
+<div id="coins">Sheckles: 50</div>
+<div id="weather">Weather: Sunny</div>
+<div id="saveLoad">
+<button onclick="saveGame()">Save</button>
+<button onclick="loadGame()">Load</button>
+</div>
+<div id="shopMenu">
+<h3 id="shopTitle">Shop</h3>
+<div id="shopItems"></div>
+<div id="restockTimer"></div>
+<button onclick="closeShop()">Close</button>
+</div>
+
+<script>
+// ===== SETTINGS =====
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const TILE = 40;
+const MAP_W = 20, MAP_H = 15;
+let coins = 50;
+let hotbar = [];
+let selectedHotbar = 0;
+let weatherTypes = ["Sunny","Rainy","Drought","Windy"];
+let currentWeather = "Sunny";
+let hintText = "";
+
+// ===== PLAYER =====
+let player={x:MAP_W/2,y:MAP_H/2,px:0,py:0,speed:0.1};
+
+// ===== KEYS =====
+let keys={};
+window.addEventListener("keydown",e=>keys[e.key]=true);
+window.addEventListener("keyup",e=>keys[e.key]=false);
+
+// ===== RESIZE CANVAS =====
+function resizeCanvas(){
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resizeCanvas);
+resizeCanvas();
+
+// ===== MAP =====
+let map=[];
+for(let y=0;y<MAP_H;y++){
+  let row=[];
+  for(let x=0;x<MAP_W;x++){
+    row.push({soil:true, plant:null});
+  }
+  map.push(row);
+}
+
+// ===== SHOPS =====
+let seedShop={x:2,y:2, stock:[]};
+let sellerShop={x:17,y:2};
+
+// ===== SEEDS =====
+const allSeeds=[
+{name:"Carrot",cost:10,type:"Single",growthTime:8000,sellValue:10,perennial:false,mutationChance:0.05,rarity:1},
+{name:"Strawberry",cost:50,type:"Multiple",growthTime:10000,sellValue:50,perennial:true,mutationChance:0.1,rarity:1},
+{name:"Blueberry",cost:400,type:"Multiple",growthTime:15000,sellValue:400,perennial:true,mutationChance:0.12,rarity:0.7},
+{name:"Orange Tulip",cost:600,type:"Single",growthTime:12000,sellValue:600,perennial:false,mutationChance:0.08,rarity:0.7},
+{name:"Tomato",cost:800,type:"Multiple",growthTime:12000,sellValue:800,perennial:true,mutationChance:0.1,rarity:0.5},
+{name:"Corn",cost:1300,type:"Multiple",growthTime:18000,sellValue:1300,perennial:true,mutationChance:0.12,rarity:0.5},
+{name:"Daffodil",cost:1000,type:"Single",growthTime:10000,sellValue:1000,perennial:false,mutationChance:0.08,rarity:0.5},
+{name:"Watermelon",cost:2500,type:"Single",growthTime:25000,sellValue:2500,perennial:false,mutationChance:0.15,rarity:0.3},
+{name:"Pumpkin",cost:3000,type:"Single",growthTime:25000,sellValue:3000,perennial:false,mutationChance:0.15,rarity:0.3},
+{name:"Apple",cost:3250,type:"Multiple",growthTime:30000,sellValue:3250,perennial:true,mutationChance:0.15,rarity:0.3},
+{name:"Bamboo",cost:4000,type:"Single",growthTime:30000,sellValue:4000,perennial:false,mutationChance:0.15,rarity:0.3},
+{name:"Coconut",cost:6000,type:"Multiple",growthTime:35000,sellValue:6000,perennial:true,mutationChance:0.18,rarity:0.2},
+{name:"Cactus",cost:15000,type:"Multiple",growthTime:40000,sellValue:15000,perennial:true,mutationChance:0.2,rarity:0.2},
+{name:"Dragon Fruit",cost:50000,type:"Multiple",growthTime:50000,sellValue:50000,perennial:true,mutationChance:0.25,rarity:0.2},
+{name:"Mango",cost:100000,type:"Multiple",growthTime:60000,sellValue:100000,perennial:true,mutationChance:0.25,rarity:0.2},
+{name:"Grape",cost:850000,type:"Multiple",growthTime:80000,sellValue:850000,perennial:true,mutationChance:0.3,rarity:0.1},
+{name:"Mushroom",cost:150000,type:"Single",growthTime:70000,sellValue:150000,perennial:false,mutationChance:0.2,rarity:0.1},
+{name:"Pepper",cost:1000000,type:"Multiple",growthTime:90000,sellValue:1000000,perennial:true,mutationChance:0.3,rarity:0.1},
+{name:"Beanstalk",cost:10000000,type:"Multiple",growthTime:120000,sellValue:10000000,perennial:true,mutationChance:0.35,rarity:0.05},
+{name:"Ember Lily",cost:15000000,type:"Multiple",growthTime:130000,sellValue:15000000,perennial:true,mutationChance:0.35,rarity:0.05},
+{name:"Sugar Apple",cost:25000000,type:"Multiple",growthTime:150000,sellValue:25000000,perennial:true,mutationChance:0.4,rarity:0.05},
+{name:"Burning Bud",cost:50000000,type:"Multiple",growthTime:160000,sellValue:50000000,perennial:true,mutationChance:0.4,rarity:0.05},
+{name:"Giant Pinecone",cost:55000000,type:"Multiple",growthTime:170000,sellValue:55000000,perennial:true,mutationChance:0.4,rarity:0.05},
+{name:"Elder Strawberry",cost:70000000,type:"Multiple",growthTime:180000,sellValue:70000000,perennial:true,mutationChance:0.45,rarity:0.05},
+{name:"Romanesco",cost:88000000,type:"Multiple",growthTime:190000,sellValue:88000000,perennial:true,mutationChance:0.45,rarity:0.05},
+{name:"Crimson Thorn",cost:10000000000,type:"Multiple",growthTime:250000,sellValue:10000000000,perennial:true,mutationChance:0.5,rarity:0.001},
+{name:"Great Pumpkin",cost:15000000000,type:"Multiple",growthTime:260000,sellValue:15000000000,perennial:true,mutationChance:0.5,rarity:0.001},
+{name:"Trinity Fruit",cost:100000000000,type:"Multiple",growthTime:300000,sellValue:100000000000,perennial:true,mutationChance:0.55,rarity:0.001},
+{name:"Buttercup",cost:600,type:"Single",growthTime:12000,sellValue:600,perennial:false,mutationChance:0.08,rarity:0.7},
+{name:"Zebrazinkle",cost:20000000000,type:"Multiple",growthTime:280000,sellValue:20000000000,perennial:true,mutationChance:0.5,rarity:0.001}
+];
+
+// ===== HOTBAR =====
+function updateHotbar(){
+  const hotbarDiv = document.getElementById("hotbar");
+  hotbarDiv.innerHTML="";
+  hotbar.forEach((item,i)=>{
+    const slot = document.createElement("div");
+    slot.className="hotbar-slot";
+    if(i===selectedHotbar) slot.classList.add("selected");
+    slot.innerHTML = item.name + " x"+item.qty;
+    if(item.mutations && item.mutations.length>0){
+      slot.innerHTML += "<br><small>"+item.mutations.join(", ")+"</small>";
+    }
+    slot.onclick=()=>{selectedHotbar=i;updateHotbar();}
+    hotbarDiv.appendChild(slot);
+  });
+}
+updateHotbar();
+
+// ===== SHOP RESTOCK (EXPONENTIAL RARITY CHANCE) =====
+let restockInterval = 3*60*1000; // 3 minutes
+let restockCountdown = restockInterval;
+
+function restockShop(){
+  seedShop.stock=[];
+  allSeeds.forEach(seed=>{
+    let chance = Math.pow(seed.rarity,1.5); 
+    if(Math.random() <= chance){
+      seedShop.stock.push({seed:seed, qty:Math.floor(Math.random()*5+1)});
+    }
+  });
+  restockCountdown = restockInterval;
+}
+restockShop();
+setInterval(() => { restockShop(); }, restockInterval);
+
+// ===== RESTOCK TIMER =====
+function updateRestockTimer(){
+  restockCountdown -= 1000;
+  if(restockCountdown < 0) restockCountdown = 0;
+  const seconds = Math.floor(restockCountdown/1000);
+  document.getElementById("restockTimer").textContent = "Next restock in: " + seconds + "s";
+}
+setInterval(updateRestockTimer,1000);
+
+// ===== WEATHER =====
+function changeWeather(){
+  currentWeather = weatherTypes[Math.floor(Math.random()*weatherTypes.length)];
+  document.getElementById("weather").textContent="Weather: "+currentWeather;
+}
+setInterval(changeWeather,30000);
+
+// ===== PLANTS =====
+function checkMutation(plant){
+  let chance = plant.mutationChance;
+  switch(currentWeather){
+    case "Sunny": chance*=1; break;
+    case "Rainy": if(plant.name.includes("Berry")) chance*=2; break;
+    case "Drought": if(plant.type==="Single") chance*=1.5; break;
+    case "Windy": chance*=0.8; break;
+  }
+  return Math.random()<chance;
+}
+
+// ===== SHOP MENU FUNCTIONS =====
+const shopMenu = document.getElementById("shopMenu");
+const shopItems = document.getElementById("shopItems");
+const shopTitle = document.getElementById("shopTitle");
+
+function getRarityText(rarity){
+  if(rarity>=0.9) return "Common";
+  if(rarity>=0.7) return "Uncommon";
+  if(rarity>=0.5) return "Rare";
+  if(rarity>=0.3) return "Legendary";
+  if(rarity>=0.1) return "Mythical";
+  if(rarity>=0.05) return "Divine";
+  if(rarity>=0.01) return "Prismatic";
+  return "Transcendent";
+}
+
+// ===== SEED SHOP (SHOW ALL SEEDS WITH DISABLED BUTTONS IF OUT OF STOCK) =====
+function openSeedShop(){
+  shopMenu.style.display = "block";
+  shopTitle.textContent = "Seed Shop";
+  shopItems.innerHTML="";
+  allSeeds.forEach(seed=>{
+    let stockItem = seedShop.stock.find(s=>s.seed.name===seed.name);
+    let qty = stockItem ? stockItem.qty : 0;
+    const div = document.createElement("div");
+    div.style.display = "flex";
+    div.style.justifyContent = "space-between";
+    div.style.marginBottom = "5px";
+    div.textContent=`${seed.name} ($${seed.cost}) x${qty} [${getRarityText(seed.rarity)}]`;
+
+    const btn = document.createElement("button");
+    btn.textContent="Buy";
+    btn.disabled = coins < seed.cost || qty <= 0;
+    btn.onclick = () => {
+      if(coins>=seed.cost && qty>0){
+        coins -= seed.cost;
+        let found = hotbar.find(h=>h.name===seed.name);
+        if(found) found.qty++; 
+        else hotbar.push({name:seed.name,seed:seed,qty:1});
+        stockItem.qty--; 
+        updateHotbar();
+        document.getElementById("coins").textContent = "Coins: "+coins;
+        openSeedShop();
+      }
+    };
+    div.appendChild(btn);
+    shopItems.appendChild(div);
+  });
+}
+
+// ===== SELLER SHOP (SELL ALL HOTBAR PLANTS) =====
+function openSellerShop() {
+  shopMenu.style.display = "block";
+  shopTitle.textContent = "Seller Shop";
+  const shopItemsContainer = document.getElementById("shopItems");
+  shopItemsContainer.innerHTML = ""; 
+
+  const btn = document.createElement("button");
+  btn.textContent = "Sell All Items in Hotbar";
+  
+  btn.onclick = () => {
+    let total = 0;
+
+    hotbar.forEach(item => {
+      // Find the matching seed in your allSeeds list to get the price
+      const seedData = allSeeds.find(s => s.name === item.name);
+      
+      if (seedData) {
+        total += seedData.sellValue * (item.qty || 0);
+      }
+    });
+
+    if (total > 0) {
+      coins += total;
+      hotbar = []; // Clear the hotbar array
+      selectedHotbar = 0;
+      
+      // Update the UI
+      document.getElementById("coins").textContent = "Coins: " + coins;
+      updateHotbar();
+      
+      alert("Sold all items for " + total + " coins!");
+    } else {
+      alert("Your hotbar is empty or items have no value!");
+    }
+  };
+
+  shopItemsContainer.appendChild(btn);
+}
+
+
+function closeShop(){ shopMenu.style.display="none"; }
+
+// ===== SAVE/LOAD =====
+function saveGame(){
+  const saveData = {coins, hotbar, map, seedShop};
+  const dataStr = "data:text/json;charset=utf-8,"+encodeURIComponent(JSON.stringify(saveData));
+  const dlAnchor = document.createElement("a");
+  dlAnchor.setAttribute("href", dataStr);
+  dlAnchor.setAttribute("download","garden_save.json");
+  dlAnchor.click();
+}
+
+function loadGame(){
+  const input = document.createElement("input");
+  input.type="file";
+  input.accept=".json";
+  input.onchange = e=>{
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onload = event=>{
+      const data = JSON.parse(event.target.result);
+      coins = data.coins;
+      hotbar = data.hotbar;
+      map = data.map;
+      seedShop = data.seedShop;
+      updateHotbar();
+      document.getElementById("coins").textContent="Coins: "+coins;
+    }
+    reader.readAsText(file);
+  };
+  input.click();
+}
+// ===== DRAW PLANT FUNCTION =====
+function drawPlant(tile, sx, sy){
+  const p = tile.plant;
+  const size = TILE/4 + TILE/4*p.stage;
+  const mut = p.mutated ? true : false;
+  
+  ctx.save();
+  ctx.translate(sx+TILE/2, sy+TILE/2);
+  function color(c){return mut?'gold':c;}
+  
+  switch(p.name){
+    case "Carrot":
+      ctx.fillStyle=color("orange");
+      ctx.beginPath();
+      ctx.moveTo(0,-size);
+      ctx.lineTo(-size/2,size);
+      ctx.lineTo(size/2,size);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle=color("green");
+      ctx.fillRect(-size/4,-size-5,size/2,5);
+      break;
+    case "Strawberry":
+      ctx.fillStyle=color("red");
+      ctx.beginPath();
+      ctx.arc(0,0,size/2,0,Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle=color("green");
+      ctx.fillRect(-size/4,-size/2,size/2,5);
+      break;
+    case "Bamboo":
+      ctx.fillStyle=color("green");
+      ctx.fillRect(-size/4,-size,size/2,size*2);
+      break;
+    case "Daffodil":
+    case "Orange Tulip":
+      ctx.fillStyle=color("green");
+      ctx.fillRect(-size/6,0,size/3,size);
+      ctx.fillStyle=color(p.name==="Daffodil"?"yellow":"orange");
+      ctx.beginPath();
+      ctx.arc(0,-size, size/2,0,Math.PI*2);
+      ctx.fill();
+      break;
+    default:
+      ctx.fillStyle=color("green");
+      ctx.beginPath();
+      ctx.arc(0,0,size/2,0,Math.PI*2);
+      ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ===== GAME LOOP =====
+function updateHint(){
+  const px = player.x, py = player.y;
+  hintText="";
+  if(Math.hypot(px-seedShop.x,py-seedShop.y)<=1) hintText="Press E to open Seed Shop";
+  else if(Math.hypot(px-sellerShop.x,py-sellerShop.y)<=1) hintText="Press E to open Seller Shop";
+
+  const pxTile = Math.floor(px);
+  const pyTile = Math.floor(py);
+  const tile = map[pyTile]?.[pxTile];
+  if(tile?.plant && tile.plant.stage>=2){
+    hintText = `Press Q to harvest ${tile.plant.name}`;
+  }
+}
+
+function gameLoop(){
+  if(keys["ArrowUp"]||keys["w"]) player.y-=player.speed;
+  if(keys["ArrowDown"]||keys["s"]) player.y+=player.speed;
+  if(keys["ArrowLeft"]||keys["a"]) player.x-=player.speed;
+  if(keys["ArrowRight"]||keys["d"]) player.x+=player.speed;
+
+  if(player.x<0) player.x=0; if(player.y<0) player.y=0;
+  if(player.x>MAP_W-1) player.x=MAP_W-1; if(player.y>MAP_H-1) player.y=MAP_H-1;
+
+  player.px = player.x*TILE - canvas.width/2 + TILE/2;
+  player.py = player.y*TILE - canvas.height/2 + TILE/2;
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(let y=0;y<MAP_H;y++){
+    for(let x=0;x<MAP_W;x++){
+      const tile = map[y][x];
+      const sx = x*TILE - player.px, sy = y*TILE - player.py;
+      ctx.fillStyle="#7bb56d"; ctx.fillRect(sx,sy,TILE,TILE);
+      ctx.strokeStyle="#6fa55d"; ctx.strokeRect(sx,sy,TILE,TILE);
+
+      if(tile.plant){
+        let stage = Math.min(2,Math.floor((Date.now()-tile.plant.plantedAt)/(tile.plant.growthTime/3)));
+        tile.plant.stage=stage;
+        drawPlant(tile,sx,sy);
+      }
+
+      if(x===seedShop.x && y===seedShop.y){ctx.fillStyle="orange"; ctx.fillRect(sx,sy,TILE,TILE);}
+      if(x===sellerShop.x && y===sellerShop.y){ctx.fillStyle="purple"; ctx.fillRect(sx,sy,TILE,TILE);}
+    }
+  }
+
+  const pxTile = Math.floor(player.x);
+  const pyTile = Math.floor(player.y);
+  const currentTile = map[pyTile]?.[pxTile];
+  if(currentTile?.plant && currentTile.plant.stage >= 2){
+    const sx = pxTile*TILE - player.px;
+    const sy = pyTile*TILE - player.py;
+    ctx.fillStyle="rgba(128,128,128,0.5)";
+    ctx.beginPath();
+    ctx.arc(sx+TILE/2, sy+TILE/2, TILE/2, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  ctx.fillStyle="blue";
+  ctx.fillRect(canvas.width/2-TILE/2,canvas.height/2-TILE/2,TILE,TILE);
+
+  updateHint();
+  ctx.fillStyle="white";
+  ctx.font="20px Arial";
+  ctx.fillText(hintText, 10, canvas.height - 20);
+
+  requestAnimationFrame(gameLoop);
+}
+gameLoop();
+
+// ===== KEY INTERACTIONS =====
+window.addEventListener("keydown", e => {
+  const pxTile = Math.floor(player.x);
+  const pyTile = Math.floor(player.y);
+  const tile = map[pyTile]?.[pxTile];
+
+  if(e.key==="e"||e.key==="E"){
+    const distSeed = Math.hypot(player.x-seedShop.x, player.y-seedShop.y);
+    const distSeller = Math.hypot(player.x-sellerShop.x, player.y-sellerShop.y);
+    if(distSeed<=1) openSeedShop();
+    else if(distSeller<=1) openSellerShop();
+  }
+
+  if(e.key>="1" && e.key<="9"){selectedHotbar=Math.min(hotbar.length-1,parseInt(e.key)-1);updateHotbar();}
+
+  if(e.key==="q"||e.key==="Q"){
+    if(tile?.plant && tile.plant.stage>=2){
+      const plant = tile.plant;
+      let sellValue = plant.sellValue;
+      if(plant.type==="Single") sellValue = Math.floor(sellValue*1.5);
+
+      let mutated = checkMutation(plant);
+      plant.mutated = mutated;
+
+      let displayName = plant.name;
+      let mutations = [];
+      if(mutated){ displayName += " (Mutated)"; mutations.push("Mutation"); }
+
+      let found = hotbar.find(h=>h.name===displayName);
+      if(found) found.qty++;
+      else hotbar.push({name:displayName, seed:{growthTime:plant.growthTime,type:plant.type,perennial:plant.perennial,mutationChance:plant.mutationChance}, qty:1, sellValue:sellValue, mutations:mutations});
+
+      if(plant.perennial) plant.plantedAt = Date.now();
+      else tile.plant = null;
+
+      updateHotbar();
+    }
+  }
+
+  if(e.key===" " && hotbar[selectedHotbar]){
+    if(!tile.plant){
+      tile.plant = {name:hotbar[selectedHotbar].name.replace(" (Mutated)",""), plantedAt:Date.now(), growthTime:hotbar[selectedHotbar].seed.growthTime, type:hotbar[selectedHotbar].seed.type, perennial:hotbar[selectedHotbar].seed.perennial, mutationChance:hotbar[selectedHotbar].seed.mutationChance, mutated:false, stage:0, sellValue:hotbar[selectedHotbar].sellValue};
+      hotbar[selectedHotbar].qty--;
+      if(hotbar[selectedHotbar].qty<=0) hotbar.splice(selectedHotbar,1);
+      updateHotbar();
+    }
+  }
+});
+</script>
+</body>
+</html>

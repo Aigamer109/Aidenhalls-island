@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Typing club Portal</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f0f2f5; }
+        #click-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.9); color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; cursor: pointer; }
+        .card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; max-width: 400px; }
+        h1 { color: #333; margin-bottom: 10px; }
+        p { color: #666; margin-bottom: 25px; line-height: 1.5; }
+        .btn { display: inline-block; padding: 12px 30px; background-color: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; transition: background 0.3s; margin-bottom: 20px; }
+        .btn:hover { background-color: #0056b3; }
+        .control-container { margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px; }
+        label { font-size: 14px; color: #666; display: block; margin-bottom: 5px; }
+        input[type=range] { width: 100%; cursor: pointer; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div id="click-overlay">
+        <h1>Typing club Portal</h1>
+        <p>Click anywhere to start</p>
+    </div>
+    <div class="card">
+        <h1>Typing club Portal</h1>
+        <p>For security, typing club must be opened in its own window. Click the button below to start typing.</p>
+        <a href="https://www.typingclub.com/" target="_blank" class="btn" id="launch-btn">Launch Typing club</a>
+        
+        <div class="control-container">
+            <label for="volume-slider">Music Volume</label>
+            <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1">
+            
+            <!-- Speed Slider Added Here -->
+            <label for="speed-slider">Playback Speed: <span id="speed-val">1</span>x</label>
+            <input type="range" id="speed-slider" min="0.01" max="5" step="0.01" value="1">
+        </div>
+    </div>
+
+    <script>
+        const playlist = [
+            "https://files.catbox.moe/netb3b",
+            "https://files.catbox.moe/vf4z9n",
+            "https://files.catbox.moe/klbtjp",
+        ];
+        let currentTrack = 0;
+        const introSound = new Audio();
+        const overlay = document.getElementById('click-overlay');
+        const volumeSlider = document.getElementById('volume-slider');
+        const speedSlider = document.getElementById('speed-slider');
+        const speedValDisplay = document.getElementById('speed-val');
+
+        function playCurrentTrack() {
+            introSound.src = playlist[currentTrack];
+            introSound.volume = volumeSlider.value;
+            // Set playback rate after source is loaded
+            introSound.playbackRate = speedSlider.value;
+            introSound.play().catch(e => console.log("Playback error:", e));
+        }
+
+        overlay.addEventListener('click', () => {
+            overlay.style.display = 'none';
+            playCurrentTrack();
+        });
+
+        // Volume Logic
+        volumeSlider.addEventListener('input', (e) => {
+            introSound.volume = e.target.value;
+        });
+
+        // Speed Logic
+        speedSlider.addEventListener('input', (e) => {
+            const val = e.target.value;
+            introSound.playbackRate = val;
+            speedValDisplay.textContent = val;
+        });
+
+        // Playlist Logic
+        introSound.addEventListener('ended', () => {
+            currentTrack++;
+            if (currentTrack >= playlist.length) {
+                currentTrack = 0; 
+            }
+            playCurrentTrack();
+        });
+
+        // Ensure speed persists when track changes
+        introSound.addEventListener('play', () => {
+            introSound.playbackRate = speedSlider.value;
+        });
+    </script>
+</body>
+</html>

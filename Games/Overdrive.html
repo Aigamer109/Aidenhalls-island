@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OVERDRIVE TD</title>
+    <style>
+        body { margin: 0; background: #0a0a0a; color: #2ecc71; font-family: 'Segoe UI', sans-serif; overflow: hidden; display: flex; }
+        #sidebar { width: 340px; background: rgba(10, 10, 10, 0.9); border-right: 3px solid #2ecc71; padding: 25px; box-sizing: border-box; box-shadow: 10px 0 30px rgba(0,0,0,0.5); z-index: 10; }
+        canvas { background: #1b5e20; cursor: crosshair; transition: transform 0.1s; }
+        .stat-box { border: 2px solid #2ecc71; padding: 15px; background: rgba(46, 204, 113, 0.05); margin-bottom: 20px; border-radius: 8px; position: relative; overflow: hidden; }
+        .stat-box::after { content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%; background: linear-gradient(45deg, transparent, rgba(46, 204, 113, 0.1), transparent); animation: sweep 4s infinite linear; }
+        @keyframes sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .shop-item { border: 1px solid #333; padding: 15px; cursor: pointer; margin-bottom: 12px; border-radius: 8px; transition: 0.3s; background: #151515; }
+        .shop-item:hover { background: #1b5e20; transform: translateX(10px); }
+        .shop-item.active { border-color: #fff; background: #2ecc71; color: #000; box-shadow: 0 0 20px #2ecc71; }
+        .cost { float: right; font-weight: bold; }
+        #msg { color: #ff4757; font-weight: bold; height: 30px; text-transform: uppercase; letter-spacing: 2px; }
+        .upgrade-hint { font-size: 12px; color: #888; margin-top: 20px; border-top: 1px solid #333; padding-top: 10px; }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <h1 style="margin:0; font-style: italic; letter-spacing: -2px;">OVERDRIVE TD</h1>
+        <div id="msg"></div>
+        <div class="stat-box">
+            <div style="font-size: 24px;">$ <span id="money">800</span></div>
+            <div>CORE: <span id="health">100</span>%</div>
+            <div>WAVE: <span id="wave">0</span></div>
+        </div>
+        <div id="shop">
+            <div class="shop-item active" onclick="setTool('LASER', 50, this)">
+                <b>LASER</b> <span class="cost">$50</span>
+                <div style="font-size:11px">Focus fire. Best for shields.</div>
+            </div>
+            <div class="shop-item" onclick="setTool('PLASMA', 200, this)">
+                <b>BEAM CANNON</b> <span class="cost">$200</span>
+                <div style="font-size:11px">High explosive. Shreds armor.</div>
+            </div>
+            <div class="shop-item" onclick="setTool('STASIS', 150, this)">
+                <b>SLOW FIELD</b> <span class="cost">$150</span>
+                <div style="font-size:11px">Cryo-slow. Bypasses EMP.</div>
+            </div>
+        </div>
+        <div class="upgrade-hint">
+            <b>TIP:</b> Click an existing tower to <b>UPGRADE</b> ($100).<br><br>
+            <b>RED</b> = Heavy Armor<br><b>CYAN</b> = EMP Pulse
+        </div>
+    </div>
+    <canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const TILE = 64;
+canvas.width = window.innerWidth - 340;
+canvas.height = window.innerHeight;
+
+const G = {
+    money: 800, health: 100, wave: 0,
+    enemies: [], towers: [], projectiles: [], particles: [], texts: [],
+    tool: 'LASER', cost: 50, path: [], shake: 0
+};
+
+// --- INITIALIZE TERRAIN ---
+function init() {
+    const cols = Math.floor(canvas.width / TILE);
+    const rows = Math.floor(canvas.height / TILE);
+    for(let x=0; x<cols-1; x++) G.path.push({x, y: 2});
+    for(let y=2; y<rows-3; y++) G.path.push({x: cols-2, y});
+    for(let x=cols-2; x>=1; x--) G.path.push({x, y: rows-3});
+    for(let y=rows-3; y<rows; y++) G.path.push({x: 1, y});
+}
+
+// --- VISUAL EFFECTS ---
+function screenShake(amt) { G.shake = amt; }
+function spawnText(x, y, txt, color) { G.texts.push({x, y, txt, color, life: 40}); }
+
+class Enemy {
+    constructor(tier) {
+        const types = [
+            {hp: 50, spd: 2.2, col: '#a29bfe', arm: 0, rew: 15},   // Scout
+            {hp: 30, spd: 5.0, col: '#ffeaa7', arm: 0, rew: 20},   // Sprinter
+            {hp: 120, spd: 1.8, col: '#fab1a0', arm: 4, rew: 25},  // Soldier
+            {hp: 80, spd: 2.0, col: '#00cec9', emp: true, rew: 50},// EMP
+            {hp: 500, spd: 1.0, col: '#d63031', arm: 15, rew: 80}  // Tank
+        ];
+        const config = types[Math.min(tier, types.length-1)];
+        this.pathIdx = 0;
+        this.x = G.path[0].x * TILE + TILE/2;
+        this.y = G.path[0].y * TILE + TILE/2;
+        this.hp = config.hp * (1 + G.wave*0.2);
+        this.maxHp = this.hp;
+        this.spd = config.spd;
+        this.col = config.col;
+        this.arm = config.arm + G.wave;
+        this.emp = config.emp || false;
+        this.rew = config.rew;
+        this.slow = 1;
+    }
+    update() {
+        if(this.emp) G.towers.forEach(t => { 
+            if(Math.hypot(t.x-this.x, t.y-this.y) < 130) t.lock = 40; 
+        });
+        const target = G.path[this.pathIdx+1];
+        if(!target) { G.health -= 5; screenShake(10); return false; }
+        const tx = target.x * TILE + TILE/2, ty = target.y * TILE + TILE/2;
+        const dx = tx - this.x, dy = ty - this.y;
+        const dist = Math.hypot(dx, dy);
+        const move = this.spd * this.slow;
+        if(dist < move) this.pathIdx++;
+        else { this.x += (dx/dist)*move; this.y += (dy/dist)*move; }
+        this.slow = 1;
+        return this.hp > 0;
+    }
+    draw() {
+        ctx.shadowBlur = 15; ctx.shadowColor = this.col;
+        ctx.fillStyle = this.col;
+        ctx.beginPath(); ctx.roundRect(this.x-15, this.y-15, 30, 30, 5); ctx.fill();
+        ctx.shadowBlur = 0;
+        // Health bar
+        ctx.fillStyle = '#111'; ctx.fillRect(this.x-20, this.y-25, 40, 5);
+        ctx.fillStyle = '#2ecc71'; ctx.fillRect(this.x-20, this.y-25, (this.hp/this.maxHp)*40, 5);
+    }
+}
+
+class Tower {
+    constructor(gx, gy, type) {
+        this.x = gx * TILE + TILE/2; this.y = gy * TILE + TILE/2;
+        this.type = type; this.lvl = 1; this.lock = 0; this.cd = 0;
+    }
+    update() {
+        if(this.lock > 0) { this.lock--; return; }
+        if(this.cd > 0) this.cd--;
+        const range = (this.type === 'PLASMA' ? 220 : 160) + (this.lvl*20);
+        if(this.type === 'STASIS') {
+            G.enemies.forEach(e => { if(Math.hypot(e.x-this.x, e.y-this.y) < range) e.slow = 0.4; });
+        } else if(this.cd === 0) {
+            const target = G.enemies.find(e => Math.hypot(e.x-this.x, e.y-this.y) < range);
+            if(target) {
+                const baseDmg = this.type === 'LASER' ? 20 : 80;
+                const dmg = Math.max(5, (baseDmg + this.lvl*10) - target.arm);
+                target.hp -= dmg;
+                if(this.type === 'LASER') {
+                    G.projectiles.push({x1: this.x, y1: this.y, x2: target.x, y2: target.y, life: 4, col: '#2ecc71'});
+                    this.cd = Math.max(5, 12 - this.lvl);
+                } else {
+                    G.projectiles.push({x1: this.x, y1: this.y, x2: target.x, y2: target.y, life: 15, col: '#f1c40f', boom: true});
+                    this.cd = 60; screenShake(5);
+                }
+            }
+        }
+    }
+    draw() {
+        ctx.fillStyle = this.lock > 0 ? '#444' : (this.type==='LASER'?'#2ecc71':(this.type==='PLASMA'?'#f1c40f':'#3498db'));
+        ctx.beginPath(); ctx.moveTo(this.x, this.y-25); ctx.lineTo(this.x+20, this.y+15); ctx.lineTo(this.x-20, this.y+15); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 12px Arial'; ctx.fillText("v"+this.lvl, this.x-8, this.y+10);
+    }
+}
+
+function loop() {
+    // Screen Shake Logic
+    if(G.shake > 0) {
+        const sx = (Math.random()-0.5)*G.shake, sy = (Math.random()-0.5)*G.shake;
+        canvas.style.transform = `translate(${sx}px, ${sy}px)`;
+        G.shake *= 0.9; if(G.shake < 0.5) G.shake = 0;
+    }
+
+    // Draw Terrain
+    ctx.fillStyle = '#1b5e20'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = 'rgba(0,0,0,0.2)'; 
+    G.path.forEach(p => ctx.fillRect(p.x*TILE, p.y*TILE, TILE, TILE));
+
+    if(G.enemies.length === 0) { G.wave++; for(let i=0; i<5+G.wave; i++) setTimeout(()=>G.enemies.push(new Enemy(Math.floor(G.wave/2))), i*800); }
+
+    G.enemies = G.enemies.filter(e => {
+        if(e.update()) { e.draw(); return true; }
+        if(e.hp <= 0) { G.money += e.rew; spawnText(e.x, e.y, "+$"+e.rew, "#f1c40f"); }
+        return false;
+    });
+
+    G.towers.forEach(t => { t.update(); t.draw(); });
+
+    G.projectiles = G.projectiles.filter(p => {
+        ctx.strokeStyle = p.col; ctx.lineWidth = p.boom ? 6 : 2;
+        ctx.beginPath(); ctx.moveTo(p.x1, p.y1); ctx.lineTo(p.x2, p.y2); ctx.stroke();
+        return --p.life > 0;
+    });
+
+    G.texts = G.texts.filter(t => {
+        ctx.fillStyle = t.color; ctx.font = 'bold 16px Arial';
+        ctx.fillText(t.txt, t.x, t.y--);
+        return --t.life > 0;
+    });
+
+    document.getElementById('money').innerText = G.money;
+    document.getElementById('health').innerText = G.health;
+    document.getElementById('wave').innerText = G.wave;
+
+    if(G.health > 0) requestAnimationFrame(loop);
+    else alert("GARDEN OVERRUN! FINAL WAVE: " + G.wave);
+}
+
+window.setTool = (t, c, el) => {
+    G.tool = t; G.cost = c;
+    document.querySelectorAll('.shop-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+};
+
+canvas.addEventListener('click', (e) => {
+    const gx = Math.floor(e.offsetX/TILE), gy = Math.floor(e.offsetY/TILE);
+    const existing = G.towers.find(t => Math.floor(t.x/TILE) === gx && Math.floor(t.y/TILE) === gy);
+    
+    if(existing) {
+        if(G.money >= 100) { G.money -= 100; existing.lvl++; spawnText(existing.x, existing.y, "LEVEL UP!", "#fff"); }
+        else { document.getElementById('msg').innerText = "NEED $100"; setTimeout(()=>document.getElementById('msg').innerText="", 2000); }
+    } else {
+        if(G.path.some(p => p.x === gx && p.y === gy)) return;
+        if(G.money >= G.cost) { G.money -= G.cost; G.towers.push(new Tower(gx, gy, G.tool)); }
+    }
+});
+
+init(); loop();
+</script>
+</body>
+</html>

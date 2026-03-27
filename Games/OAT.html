@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>ALEX ORBITER Trailer</title>
+
+<style>
+
+body{
+margin:0;
+overflow:hidden;
+background:black;
+font-family:Arial;
+color:white;
+}
+
+canvas{
+display:block;
+}
+
+#startScreen{
+position:fixed;
+top:0;
+left:0;
+width:100%;
+height:100%;
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:50px;
+background:black;
+cursor:pointer;
+z-index:10;
+}
+
+#vignette{
+position:fixed;
+top:0;
+left:0;
+width:100%;
+height:100%;
+pointer-events:none;
+background:radial-gradient(circle at center,
+transparent 30%,
+rgba(0,0,0,0.85) 100%);
+}
+
+#scoreUI{
+position:absolute;
+top:20px;
+left:20px;
+font-size:28px;
+opacity:0;
+}
+
+#title{
+position:absolute;
+top:50%;
+left:50%;
+transform:translate(-50%,-50%);
+text-align:center;
+opacity:0;
+}
+
+#release{
+font-size:22px;
+letter-spacing:2px;
+margin-bottom:15px;
+opacity:0.8;
+}
+
+#mainTitle{
+font-size:90px;
+font-weight:bold;
+}
+
+#alexText{ position:absolute; left:-1000px; }
+#orbiterText{ position:absolute; right:-1100px; }
+
+</style>
+
+</head>
+
+<body>
+
+<div id="startScreen">CLICK TO START TRAILER</div>
+
+<canvas id="c"></canvas>
+
+<div id="scoreUI">Score: <span id="score">0</span></div>
+
+<div id="vignette"></div>
+
+<div id="title">
+
+<div id="release">
+COMING FREE AT 12 PM EST / MARCH 11TH
+</div>
+
+<div id="mainTitle">
+<div id="alexText">ALEX</div>
+<div id="orbiterText">ORBITER</div>
+</div>
+
+</div>
+
+<audio id="music" src="https://files.catbox.moe/p6o3u1.mp3"></audio>
+
+<script>
+
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d");
+
+canvas.width=window.innerWidth;
+canvas.height=window.innerHeight;
+
+const alex=new Image();
+alex.src="ALEX.png";
+
+const music=document.getElementById("music");
+
+let centerX=canvas.width/2;
+let centerY=canvas.height/2;
+
+let orbitRadius=200;
+let orbitAngle=0;
+let orbitDir=1;
+
+let asteroids=[];
+let particles=[];
+let score=0;
+
+let fadeAlpha=0;
+
+function spawnAsteroid(){
+
+let edge=Math.floor(Math.random()*4);
+let x,y;
+
+if(edge===0){x=0;y=Math.random()*canvas.height;}
+if(edge===1){x=canvas.width;y=Math.random()*canvas.height;}
+if(edge===2){x=Math.random()*canvas.width;y=0;}
+if(edge===3){x=Math.random()*canvas.width;y=canvas.height;}
+
+let ang=Math.atan2(centerY-y,centerX-x);
+
+asteroids.push({
+x,y,
+vx:Math.cos(ang)*2,
+vy:Math.sin(ang)*2,
+size:18
+});
+
+}
+
+setInterval(spawnAsteroid,1200);
+
+function explosion(x,y){
+
+for(let i=0;i<25;i++){
+
+particles.push({
+x,
+y,
+vx:(Math.random()-0.5)*6,
+vy:(Math.random()-0.5)*6,
+life:60
+});
+
+}
+
+}
+
+function drawParticles(){
+
+particles.forEach((p,i)=>{
+
+p.x+=p.vx;
+p.y+=p.vy;
+p.life--;
+
+ctx.fillStyle="orange";
+ctx.fillRect(p.x,p.y,4,4);
+
+if(p.life<=0) particles.splice(i,1);
+
+});
+
+}
+
+function drawOrbitLines(){
+
+ctx.strokeStyle="rgba(255,255,255,0.2)";
+ctx.lineWidth=2;
+
+ctx.beginPath();
+ctx.arc(centerX,centerY,orbitRadius,0,Math.PI*2);
+ctx.stroke();
+
+}
+
+function drawPlayer(){
+
+let px=centerX+Math.cos(orbitAngle)*orbitRadius;
+let py=centerY+Math.sin(orbitAngle)*orbitRadius;
+
+ctx.fillStyle="#58d0ff";
+
+ctx.beginPath();
+ctx.arc(px,py,10,0,Math.PI*2);
+ctx.fill();
+
+}
+
+function updateGameplay(){
+
+orbitAngle+=0.03*orbitDir;
+
+if(Math.random()<0.04) orbitDir*=-1;
+
+asteroids.forEach((a,i)=>{
+
+let dist=Math.hypot(centerX-a.x,centerY-a.y);
+
+if(dist<300){
+a.vx*=1.02;
+a.vy*=1.02;
+}
+
+a.x+=a.vx;
+a.y+=a.vy;
+
+if(dist<80){
+
+explosion(a.x,a.y);
+asteroids.splice(i,1);
+
+}
+
+});
+
+score+=0.6;
+document.getElementById("score").textContent=Math.floor(score);
+
+}
+
+function drawAsteroids(){
+
+asteroids.forEach(a=>{
+
+ctx.fillStyle="#888";
+
+ctx.beginPath();
+ctx.arc(a.x,a.y,a.size,0,Math.PI*2);
+ctx.fill();
+
+});
+
+}
+
+function shake(){
+
+ctx.translate(
+(Math.random()-0.5)*10,
+(Math.random()-0.5)*10
+);
+
+}
+
+function cinematicIntro(t){
+
+let zoom=3;
+
+let panX=Math.sin(t*0.3)*200;
+let panY=Math.cos(t*0.2)*160;
+
+ctx.translate(centerX-panX*zoom,centerY-panY*zoom);
+ctx.scale(zoom,zoom);
+
+ctx.drawImage(alex,-centerX,-centerY,canvas.width,canvas.height);
+
+}
+
+function gameplayScene(){
+
+drawOrbitLines();
+
+ctx.drawImage(alex,centerX-120,centerY-120,240,240);
+
+updateGameplay();
+
+drawAsteroids();
+drawParticles();
+drawPlayer();
+
+}
+
+function draw(){
+
+ctx.fillStyle="black";
+ctx.fillRect(0,0,canvas.width,canvas.height);
+
+let t=music.currentTime;
+
+ctx.save();
+
+if(t<11){
+
+cinematicIntro(t);
+
+}else{
+
+document.getElementById("scoreUI").style.opacity=1;
+
+shake();
+
+gameplayScene();
+
+}
+
+ctx.restore();
+
+
+/* fade gameplay out near end */
+
+if(t>23){
+
+fadeAlpha+=0.01;
+
+ctx.fillStyle="rgba(0,0,0,"+fadeAlpha+")";
+ctx.fillRect(0,0,canvas.width,canvas.height);
+
+}
+
+/* title reveal */
+
+if(t>26){
+
+let title=document.getElementById("title");
+
+title.style.opacity=1;
+
+document.getElementById("alexText").style.left="-100px";
+document.getElementById("alexText").style.transition="left 2s";
+
+document.getElementById("orbiterText").style.right="-100px";
+document.getElementById("orbiterText").style.transition="right 2s";
+
+}
+
+requestAnimationFrame(draw);
+
+}
+
+document.getElementById("startScreen").onclick=()=>{
+
+document.getElementById("startScreen").style.display="none";
+
+music.play();
+
+draw();
+
+};
+
+</script>
+
+</body>
+</html>

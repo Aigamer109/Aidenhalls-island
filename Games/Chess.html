@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Chess vs ALEX</title>
+    <style>
+        :root { --bg: #050505; --green: #00ff41; --dark: #111; --light: #222; }
+        body { background: var(--bg); color: var(--green); font-family: 'Courier New', monospace; margin: 0; height: 100vh; overflow: hidden; display: flex; align-items: center; justify-content: center; flex-direction: column; transition: background 0.1s; }
+        
+        #alex-container { position: absolute; top: 20px; left: 20px; z-index: 100; }
+        #alex-img { width: 400px; border: 8px solid #111; border-radius: 20px; box-shadow: 0 0 40px rgba(0,255,0,0.2); transition: transform 0.3s; }
+
+        #game-area { display: none; text-align: center; perspective: 1000px; }
+        #board-frame { display: flex; position: relative; gap: 0; transition: all 0.5s; }
+        .board-half { display: grid; grid-template-columns: repeat(4, 70px); grid-template-rows: repeat(8, 70px); border: 4px solid #222; transition: all 1s ease-in; }
+        
+        .cell { width: 70px; height: 70px; display: flex; align-items: center; justify-content: center; font-size: 50px; cursor: pointer; user-select: none; position: relative; transition: all 0.6s cubic-bezier(0.6, -0.28, 0.735, 0.045); }
+        .light { background-color: var(--light); } .dark { background-color: var(--dark); }
+        .dot { width: 20px; height: 20px; background: rgba(0, 255, 65, 0.5); border-radius: 50%; pointer-events: none; position: absolute; }
+        .ring { width: 55px; height: 55px; border: 4px solid rgba(0, 255, 65, 0.4); border-radius: 50%; pointer-events: none; position: absolute; }
+        
+        .white { color: #fff; filter: drop-shadow(0 0 2px #000); }
+        .black { color: #000; filter: drop-shadow(0 0 2px #0f0); }
+
+        /* DESTRUCTION */
+        .shake { animation: shake 0.1s infinite; }
+        @keyframes shake { 0% {transform:translate(4px,4px)} 50% {transform:translate(-4px,-4px)} 100% {transform:translate(0,0)} }
+        .flash-red { background: #600 !important; }
+
+        #winner-text { display: none; color: #fff; font-size: 4rem; font-weight: bold; margin-bottom: 20px; text-shadow: 0 0 20px red; }
+
+        button { padding: 20px 40px; background: transparent; color: var(--green); border: 3px solid var(--green); cursor: pointer; font-size: 1.5rem; font-weight: bold; margin-top: 20px; font-family: inherit; }
+    </style>
+</head>
+<body id="body">
+    <div id="alex-container"><img src="../Assets/ALEX.png" id="alex-img"></div>
+    <div id="start-screen"><h1 style="color:white; font-size:3rem;">CHESS VS ALEX v10</h1><button onclick="init()">START</button></div>
+    
+    <div id="game-area">
+        <div id="winner-text"></div>
+        <div id="board-frame">
+            <div id="left-half" class="board-half"></div>
+            <div id="right-half" class="board-half"></div>
+        </div>
+        <h2 id="status">YOUR MOVE</h2>
+        <button id="reset" style="display:none;" onclick="location.reload()">RE-BOOT</button>
+    </div>
+
+<script>
+    const leftH = document.getElementById('left-half'), rightH = document.getElementById('right-half'), status = document.getElementById('status'), alex = document.getElementById('alex-img'), body = document.getElementById('body'), winText = document.getElementById('winner-text');
+    let sel = null, moves = [], raging = false;
+    const symbols = { r:'♜', n:'♞', b:'♝', q:'♛', k:'♚', p:'♟', R:'♖', N:'♘', B:'♗', Q:'♕', K:'♔', P:'♙' };
+    const pVals = { p:1, n:3, b:3, r:5, q:9, k:100 };
+    let grid = [
+        ['r','n','b','q','k','b','n','r'],['p','p','p','p','p','p','p','p'],
+        ['','','','','','','',''],['','','','','','','',''],
+        ['','','','','','','',''],['','','','','','','',''],
+        ['P','P','P','P','P','P','P','P'],['R','N','B','Q','K','B','N','R']
+    ];
+
+    function init() { document.getElementById('start-screen').style.display='none'; document.getElementById('game-area').style.display='block'; render(); }
+
+    function render() {
+        leftH.innerHTML = ''; rightH.innerHTML = '';
+        for(let r=0; r<8; r++) for(let c=0; c<8; c++) {
+            const cell = document.createElement('div');
+            cell.className = `cell ${(r+c)%2===0?'light':'dark'}`;
+            if(grid[r][c]) {
+                const s = document.createElement('span'); s.innerText = symbols[grid[r][c]];
+                s.className = grid[r][c] === grid[r][c].toUpperCase() ? 'white' : 'black';
+                cell.appendChild(s);
+            }
+            if(moves.find(m => m.r === r && m.c === c)) {
+                const d = document.createElement('div'); d.className = grid[r][c] ? 'ring' : 'dot';
+                cell.appendChild(d);
+            }
+            cell.onclick = () => click(r,c); (c < 4 ? leftH : rightH).appendChild(cell);
+        }
+    }
+
+    function click(r, c) {
+        if(raging) return;
+        const m = moves.find(mv => mv.r === r && mv.c === c);
+        if(m) exec(sel.r, sel.c, r, c);
+        else if(grid[r][c] && grid[r][c] === grid[r][c].toUpperCase()) { sel = {r, c}; moves = getValid(r, c); render(); }
+        else { sel = null; moves = []; render(); }
+    }
+
+    function getValid(r, c) {
+        const p = grid[r][c].toLowerCase(), isW = grid[r][c] === grid[r][c].toUpperCase(), v = [];
+        const pushM = (nr, nc) => {
+            if(nr<0||nr>7||nc<0||nr>7||nc>7) return false;
+            if(!grid[nr][nc]) { v.push({r:nr, c:nc}); return true; }
+            if(isW ? grid[nr][nc] === grid[nr][nc].toLowerCase() : grid[nr][nc] === grid[nr][nc].toUpperCase()) v.push({r:nr, c:nc});
+            return false;
+        };
+        if(p === 'p') {
+            let d = isW?-1:1;
+            if(grid[r+d] && !grid[r+d][c]) { pushM(r+d, c); if((isW&&r===6||!isW&&r===1) && !grid[r+2*d][c]) pushM(r+2*d, c); }
+            [1,-1].forEach(o => { let nc=c+o; if(nc>=0&&nc<=7&&grid[r+d]&&grid[r+d][nc]&&(isW?grid[r+d][nc]===grid[r+d][nc].toLowerCase():grid[r+d][nc]===grid[r+d][nc].toUpperCase())) v.push({r:r+d, c:nc}); });
+        } else if(p === 'n') [[-2,1],[-1,2],[1,2],[2,1],[2,-1],[1,-2],[-1,-2],[-2,-1]].forEach(o => pushM(r+o[0], c+o[1]));
+        else {
+            const dirs = p==='r'?[[0,1],[0,-1],[1,0],[-1,0]]:p==='b'?[[1,1],[1,-1],[-1,1],[-1,-1]]:[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];
+            dirs.forEach(d => { for(let i=1; i<8; i++) { if(!pushM(r+d[0]*i, c+d[1]*i) || p==='k') break; } });
+        }
+        return v;
+    }
+
+    function exec(fr, fc, tr, tc) {
+        const victim = grid[tr][tc];
+        grid[tr][tc] = grid[fr][fc]; grid[fr][fc] = '';
+        sel = null; moves = []; render();
+        if(victim.toLowerCase() === 'k') { shatter(victim === 'k' ? "ALEX" : "PLAYER"); return; }
+        setTimeout(alexTurn, 600);
+    }
+
+    function alexTurn() {
+        if(raging) return;
+        let mine = []; grid.forEach((row,r) => row.forEach((p,c) => { if(p && p===p.toLowerCase()) mine.push({r,c,t:p}); }));
+        if(mine.length < 8) { shatter("PLAYER"); return; }
+        if(Math.random() < 0.20) {
+            const a = mine[Math.floor(Math.random()*mine.length)];
+            const tr = Math.floor(Math.random()*8), tc = Math.floor(Math.random()*8);
+            grid[tr][tc] = a.t; grid[a.r][a.c] = '';
+        } else {
+            let best = null, maxV = -1;
+            mine.forEach(p => {
+                getValid(p.r, p.c).forEach(m => {
+                    let v = grid[m.r][m.c] ? pVals[grid[m.r][m.c].toLowerCase()] : 0;
+                    if(v >= maxV) { maxV = v; best = {f:p, t:m}; }
+                });
+            });
+            if(best) { 
+                if(grid[best.t.r][best.t.c] === 'K') { shatter("ALEX"); return; }
+                grid[best.t.r][best.t.c] = best.f.t; grid[best.f.r][best.f.c] = ''; 
+            }
+        }
+        render();
+    }
+
+    function shatter(winner) {
+        raging = true;
+        winText.innerText = winner + " WINS";
+        winText.style.display = 'block';
+        alex.classList.add('shake');
+
+        // Calculate destination (ALEX's mouth)
+        const targetRect = alex.getBoundingClientRect();
+        const centerX = targetRect.left + (targetRect.width / 2);
+        const centerY = targetRect.top + (targetRect.height / 2);
+
+        // 1. Fly Left Half
+        setTimeout(() => { 
+            const leftRect = leftH.getBoundingClientRect();
+            const dx = centerX - (leftRect.left + leftRect.width/2);
+            const dy = centerY - (leftRect.top + leftRect.height/2);
+            
+            leftH.style.transform = `translate(${dx}px, ${dy}px) scale(0) rotate(-90deg)`;
+            leftH.style.opacity = "0";
+            body.classList.add('flash-red'); setTimeout(()=>body.classList.remove('flash-red'), 100);
+        }, 500);
+
+        // 2. Shatter Right Half Pieces
+        const rightCells = document.querySelectorAll('#right-half .cell');
+        rightCells.forEach((c, i) => {
+            setTimeout(() => {
+                const cellRect = c.getBoundingClientRect();
+                const dx = centerX - (cellRect.left + cellRect.width/2);
+                const dy = centerY - (cellRect.top + cellRect.height/2);
+                
+                c.style.position = "fixed";
+                c.style.top = cellRect.top + "px";
+                c.style.left = cellRect.left + "px";
+                c.style.zIndex = "1000";
+                
+                setTimeout(() => {
+                    c.style.transform = `translate(${dx}px, ${dy}px) scale(0) rotate(${360 + i*10}deg)`;
+                    c.style.opacity = "0";
+                    body.classList.add('flash-red'); setTimeout(()=>body.classList.remove('flash-red'), 50);
+                    alex.style.transform = `scale(${1.2 + (i * 0.01)})`;
+                }, 10);
+            }, 1000 + (i * 40));
+        });
+        
+        setTimeout(() => { status.innerText = "ALEX HAS ATE THE GAME."; document.getElementById('reset').style.display='block'; }, 3500);
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>BIG E Clicker</title>
+
+<style>
+body{
+margin:0;
+font-family:Arial;
+background:#121212;
+color:white;
+display:flex;
+}
+#left{width:55%;text-align:center;padding-top:40px;}
+#right{width:45%;height:100vh;overflow-y:auto;background:#0d0d0d;padding:10px;}
+#jeff{width:320px;cursor:pointer;transition:.1s;}
+#jeff:active{transform:scale(.95);}
+.building{background:#2a2a2a;padding:10px;margin-bottom:6px;cursor:pointer;border:1px solid #444;}
+.building:hover{background:#3a3a3a;}
+button{padding:6px 10px;margin:4px;cursor:pointer;background:#333;color:white;border:none;}
+button:hover{background:#555;}
+.menu{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1b1b1b;border:2px solid #555;padding:20px;display:none;max-height:70vh;overflow-y:auto;}
+#golden{position:absolute;top:-100px;left:50%;width:70px;height:90px;background:gold;display:none;align-items:center;justify-content:center;color:black;font-weight:bold;border-radius:6px;cursor:pointer;}
+.achievement{opacity:.5;}
+.achievement.unlocked{opacity:1;color:gold;}
+</style>
+</head>
+
+<body>
+
+<div id="golden">📁</div>
+
+<div id="left">
+<h1>BIG E Clicker</h1>
+<h2 id="score">0 People in Files</h2>
+<h3 id="cps">0 per second</h3>
+<h3 id="jp">Jeff Points: 0</h3>
+<img id="jeff" src="../../Assets/Jeff.png">
+<br><br>
+<button onclick="openAchievements()">Achievements</button>
+<button onclick="openStats()">Stats</button>
+<button onclick="ascend()">Ascend</button>
+<br>
+<!-- Added Save/Load Buttons -->
+<button onclick="downloadSave()">Download Save</button>
+<input type="file" id="loadFile" style="display:none" onchange="loadFromFile(event)">
+<button onclick="document.getElementById('loadFile').click()">Load Save</button>
+</div>
+
+<div id="right">
+<h2>Jeff Industry</h2>
+<div>
+<button onclick="setBuy(1)">Buy 1</button>
+<button onclick="setBuy(10)">Buy 10</button>
+<button onclick="setBuy(100)">Buy 100</button>
+<button onclick="setBuy('max')">Buy MAX</button>
+</div>
+<div id="shop"></div>
+</div>
+
+<div id="achMenu" class="menu">
+<h2>Achievements</h2>
+<div id="achList"></div>
+<button onclick="closeMenus()">Close</button>
+</div>
+
+<div id="statsMenu" class="menu">
+<h2>Stats</h2>
+<div id="stats"></div>
+<button onclick="closeMenus()">Close</button>
+</div>
+
+<script>
+
+let people=0;
+let perClick=1;
+let prestige=1;
+let jeffPoints=0;
+let totalClicks=0;
+let goldenClicks=0;
+let buyMode=1;
+
+function setBuy(n){ buyMode=n }
+
+function format(n){
+if(n>=1e12) return (n/1e12).toFixed(2)+"T";
+if(n>=1e9) return (n/1e9).toFixed(2)+"B";
+if(n>=1e6) return (n/1e6).toFixed(2)+"M";
+if(n>=1e3) return (n/1e3).toFixed(1)+"K";
+return Math.floor(n);
+}
+
+function updateUI(){
+score.innerText=format(people)+" People in Files";
+cps.innerText=format(calculatePerSecond())+" per second";
+jp.innerText="Jeff Points: "+format(jeffPoints);
+}
+
+jeff.onclick=()=>{
+people+=perClick*prestige;
+totalClicks++;
+updateUI();
+}
+
+/* BUILDINGS */
+
+const buildings=[
+{name:"Jeff Intern",baseCost:5,cps:.5,owned:0},
+{name:"Jeff Folder Sorter",baseCost:20,cps:2,owned:0},
+{name:"Jeff Office Worker",baseCost:60,cps:6,owned:0},
+{name:"Jeff Spreadsheet Guy",baseCost:150,cps:15,owned:0},
+{name:"Jeff Accountant",baseCost:400,cps:40,owned:0},
+{name:"Jeff HR Department",baseCost:900,cps:90,owned:0},
+{name:"Jeff Server Room",baseCost:2000,cps:180,owned:0},
+{name:"Jeff Data Center",baseCost:5000,cps:450,owned:0},
+{name:"Jeff IT Department",baseCost:12000,cps:900,owned:0},
+{name:"Jeff Corporate Office",baseCost:25000,cps:1800,owned:0},
+{name:"Jeff Grandma",baseCost:100000,cps:6000,owned:0},
+{name:"Jeff Farm",baseCost:1100000,cps:40000,owned:0},
+{name:"Jeff Mine",baseCost:12000000,cps:250000,owned:0},
+{name:"Jeff Factory",baseCost:130000000,cps:1400000,owned:0},
+{name:"Jeff Bank",baseCost:1400000000,cps:7800000,owned:0},
+{name:"Temple of Jeff",baseCost:20000000000,cps:44000000,owned:0},
+{name:"Jeff Tower",baseCost:330000000000,cps:260000000,owned:0},
+{name:"Jeff Shipment",baseCost:5100000000000,cps:1600000000,owned:0},
+{name:"Jeff Portal",baseCost:75000000000000,cps:10000000000,owned:0},
+{name:"Jeff Time Machine",baseCost:1000000000000000,cps:65000000000,owned:0},
+{name:"Jeff Infinity Machine",baseCost:15000000000000000,cps:430000000000,owned:0},
+{name:"JEFF FINAL FORM",baseCost:1000000000000000000,cps:10000000000000,owned:0}
+];
+
+const shop=document.getElementById("shop");
+
+function getCost(b){ return Math.floor(b.baseCost*Math.pow(1.12,b.owned)) }
+
+function renderShop(){
+shop.innerHTML="";
+buildings.forEach((b,i)=>{
+const div=document.createElement("div");
+div.className="building";
+div.innerHTML="<b>"+b.name+"</b><br>"+
+"Cost: "+format(getCost(b))+"<br>"+
+"Produces: "+format(b.cps)+" / sec<br>"+
+"Owned: "+b.owned;
+div.onclick=()=>buyBuilding(i);
+shop.appendChild(div);
+});
+}
+
+function buyBuilding(i){
+const b=buildings[i];
+let amount=buyMode;
+
+if(buyMode==="max"){
+while(people>=getCost(b)){
+people-=getCost(b);
+b.owned++;
+}
+}else{
+for(let j=0;j<amount;j++){
+if(people>=getCost(b)){
+people-=getCost(b);
+b.owned++;
+}
+}
+}
+
+updateUI();
+renderShop();
+}
+
+/* CALCULATE TOTAL CPS */
+
+function calculatePerSecond(){
+let cps=0;
+buildings.forEach(b=>{
+cps+=b.cps*b.owned;
+});
+return cps;
+}
+
+/* AUTO PRODUCTION */
+
+setInterval(()=>{
+people+=calculatePerSecond();
+checkAchievements();
+updateUI();
+},1000);
+
+/* GOLDEN FILE */
+
+function spawnGolden(){
+golden.style.display="flex";
+golden.style.left=Math.random()*80+"%";
+let y=-100;
+const fall=setInterval(()=>{
+y+=3;
+golden.style.top=y+"px";
+if(y>window.innerHeight){
+clearInterval(fall);
+golden.style.display="none";
+}
+},16);
+}
+
+golden.onclick=()=>{
+let bonus=calculatePerSecond()*120+Math.random()*500000;
+people+=bonus;
+goldenClicks++;
+golden.style.display="none";
+updateUI();
+}
+
+function scheduleGolden(){
+let t=(Math.random()*49+1)*60000;
+setTimeout(()=>{
+spawnGolden();
+scheduleGolden();
+},t);
+}
+scheduleGolden();
+
+/* ACHIEVEMENTS */
+
+const achievements=[
+{name:"First Click",check:()=>totalClicks>=1,reward:.05},
+{name:"Clicker",check:()=>totalClicks>=100,reward:.05},
+{name:"File Collector",check:()=>people>=10000,reward:.1},
+{name:"Millionaire",check:()=>people>=1000000,reward:.1},
+{name:"Billionaire",check:()=>people>=1000000000,reward:.2},
+{name:"Jeff Empire",check:()=>calculatePerSecond()>=1000000000,reward:.2}
+];
+
+function renderAchievements(){
+achList.innerHTML="";
+achievements.forEach(a=>{
+const div=document.createElement("div");
+div.className="achievement"+(a.unlocked?" unlocked":"");
+div.innerText=a.name;
+achList.appendChild(div);
+});
+}
+
+function checkAchievements(){
+achievements.forEach(a=>{
+if(!a.unlocked && a.check()){
+a.unlocked=true;
+prestige+=a.reward;
+renderAchievements();
+}
+});
+}
+
+/* MENUS */
+
+function openAchievements(){ achMenu.style.display="block"; renderAchievements(); }
+function openStats(){
+statsMenu.style.display="block";
+stats.innerHTML="Total Clicks: "+format(totalClicks)+"<br>"+
+"Golden Files Clicked: "+format(goldenClicks)+"<br>"+
+"Prestige Level: "+prestige;
+}
+function closeMenus(){ achMenu.style.display="none"; statsMenu.style.display="none"; }
+
+/* PRESTIGE */
+
+function ascend(){
+let gain=Math.floor(Math.sqrt(people/1000000));
+if(gain<=0){ alert("You need at least 1M People in Files to ascend."); return; }
+if(confirm("Ascend and gain "+gain+" Jeff Points?")){
+jeffPoints+=gain;
+prestige+=gain*.2;
+people=0;
+buildings.forEach(b=>{b.owned=0;});
+renderShop();
+updateUI();
+}
+}
+
+/* SAVE & LOAD */
+
+// Auto-save to localStorage every 5 seconds
+function save(){
+localStorage.setItem("bigE_save",JSON.stringify({
+people,
+prestige,
+buildings:buildings.map(b=>({owned:b.owned})),
+totalClicks,
+goldenClicks,
+jeffPoints,
+time:Date.now()
+}));
+}
+
+// Load from localStorage
+function load(){
+const s=localStorage.getItem("bigE_save");
+if(!s) return;
+const data=JSON.parse(s);
+people=data.people||0;
+prestige=data.prestige||1;
+totalClicks=data.totalClicks||0;
+goldenClicks=data.goldenClicks||0;
+jeffPoints=data.jeffPoints||0;
+if(data.buildings){
+data.buildings.forEach((b,i)=>{ if(buildings[i]) buildings[i].owned=b.owned||0; });
+}
+updateUI();
+renderShop();
+}
+setInterval(save,5000);
+load();
+
+/* DOWNLOAD SAVE */
+function downloadSave(){
+    const dataStr = JSON.stringify({
+        people,
+        prestige,
+        buildings: buildings.map(b => ({owned: b.owned})),
+        totalClicks,
+        goldenClicks,
+        jeffPoints,
+        time:Date.now()
+    });
+    const blob = new Blob([dataStr], {type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "BIG_E_Clicker_Save.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+/* LOAD SAVE FROM FILE */
+function loadFromFile(event){
+    const file = event.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e){
+        try{
+            const data = JSON.parse(e.target.result);
+            people = data.people || 0;
+            prestige = data.prestige || 1;
+            totalClicks = data.totalClicks || 0;
+            goldenClicks = data.goldenClicks || 0;
+            jeffPoints = data.jeffPoints || 0;
+            if(data.buildings){
+                data.buildings.forEach((b,i)=>{
+                    if(buildings[i]) buildings[i].owned = b.owned || 0;
+                });
+            }
+            updateUI();
+            renderShop();
+            alert("Save loaded successfully!");
+        }catch(err){
+            alert("Failed to load save file.");
+        }
+    };
+    reader.readAsText(file);
+}
+
+</script>
+
+</body>
+</html>

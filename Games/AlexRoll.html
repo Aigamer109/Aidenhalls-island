@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Alex Roll</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #2c3e50; font-family: sans-serif; touch-action: none; }
+        canvas { display: block; }
+        #ui { position: fixed; top: 15px; right: 15px; color: white; font-size: 22px; text-shadow: 2px 2px 4px black; pointer-events: none; z-index: 10; }
+        #menuBtn { position: fixed; top: 15px; left: 15px; width: 45px; height: 45px; background: rgba(0,0,0,0.7); color: white; border: 2px solid white; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 100; font-size: 20px; }
+        #menu { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.95); color: white; padding: 40px; border-radius: 20px; border: 4px solid #ff4400; display: none; text-align: center; z-index: 101; }
+        .btn-menu { background: #ff4400; border: none; color: white; padding: 12px 24px; margin: 10px; cursor: pointer; font-size: 18px; border-radius: 8px; width: 220px; font-weight: bold; }
+        #controls { position: fixed; bottom: 50px; width: 100%; display: none; pointer-events: none; z-index: 10; }
+        .btn-ctrl { position: absolute; width: 125px; height: 125px; border-radius: 50%; background: rgba(255,255,255,0.2); border: 3px solid rgba(255,255,255,0.7); pointer-events: auto; }
+        #left { left: 30px; } #right { left: 130px; } #jump { right: 35px; background: rgba(255, 60, 0, 0.3); }
+    </style>
+</head>
+<body>
+    <div id="menuBtn">⚙️</div>
+    <div id="ui">0m</div>
+    <div id="menu">
+        <h2 style="color:#ff4400">PAUSED</h2>
+        <button class="btn-menu" id="toggleUnit">Unit: Meters</button><br>
+        <button class="btn-menu" id="resumeBtn">Resume</button>
+    </div>
+    <div id="controls">
+        <div class="btn-ctrl" id="left"></div>
+        <div class="btn-ctrl" id="right"></div>
+        <div class="btn-ctrl" id="jump"></div>
+    </div>
+    <canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+if(isMobile) document.getElementById("controls").style.display = "block";
+
+const player = { 
+    x: 400, y: 300, vx: 0, vy: 0, 
+    baseRadius: 25, radius: 25, 
+    baseSize: 95, drawSize: 95, 
+    rotation: 0, onGround: false, canDoubleJump: false, jumping: false,
+    sizeTimer: 0 
+};
+
+const alex = new Image(); alex.src = "ALEX.png";
+const input = { left: false, right: false, jumpPressed: false };
+let paused = false, useAmerican = false, maxHeight = 0, lavaY = 1000, shake = 0;
+
+/* ---------------- MENU ---------------- */
+const menu = document.getElementById("menu");
+const unitBtn = document.getElementById("toggleUnit");
+document.getElementById("menuBtn").onclick = toggleMenu;
+document.getElementById("resumeBtn").onclick = toggleMenu;
+unitBtn.onclick = () => { 
+    useAmerican = !useAmerican; 
+    unitBtn.innerText = useAmerican ? "Unit: U.S" : "Unit: Meters"; 
+};
+function toggleMenu() { paused = !paused; menu.style.display = paused ? "block" : "none"; }
+
+/* ---------------- INPUTS ---------------- */
+addEventListener("keydown", e => {
+    if(e.code=="KeyQ") toggleMenu();
+    if(paused) return;
+    if(e.code=="KeyA" || e.code=="ArrowLeft") input.left = true;
+    if(e.code=="KeyD" || e.code=="ArrowRight") input.right = true;
+    if(e.code=="Space") { if(!input.jumpPressed) doJump(); input.jumpPressed = true; }
+});
+addEventListener("keyup", e => {
+    if(e.code=="KeyA" || e.code=="ArrowLeft") input.left = false;
+    if(e.code=="KeyD" || e.code=="ArrowRight") input.right = false;
+    if(e.code=="Space") input.jumpPressed = false;
+});
+
+function setupTouch(id, key) {
+    let el = document.getElementById(id);
+    el.addEventListener("touchstart", e => { e.preventDefault(); if(key==="jump") doJump(); else input[key]=true; }, {passive:false});
+    el.addEventListener("touchend", e => { e.preventDefault(); if(key!=="jump") input[key]=false; }, {passive:false});
+}
+setupTouch("left","left"); setupTouch("right","right"); setupTouch("jump","jump");
+
+function pollGamepad() {
+    let gp = navigator.getGamepads()[0];
+    if(!gp) return;
+    input.left = gp.axes[0] < -0.3 || gp.buttons[14].pressed;
+    input.right = gp.axes[0] > 0.3 || gp.buttons[15].pressed;
+    if(gp.buttons[0].pressed && !input.jumpPressed) doJump();
+    input.jumpPressed = gp.buttons[0].pressed;
+    if(gp.buttons[9].pressed) toggleMenu(); // Options button
+}
+
+function doJump() {
+    if(player.onGround) {
+        player.vy = -18; player.onGround = false; player.jumping = true; player.canDoubleJump = true;
+    } else if(player.canDoubleJump) {
+        player.vy = -16; player.canDoubleJump = false; player.jumping = true;
+    }
+}
+
+/* ---------------- WORLD ---------------- */
+let platforms = [];
+let items = [];
+let lastPlatY = 400;
+
+function spawnPlatform() {
+    let type = Math.random() > 0.88 ? 'tramp' : 'plat';
+    let w = type === 'tramp' ? 100 : (140 + Math.random() * 120);
+    let nextX = Math.random() * (canvas.width - w);
+    let nextY = lastPlatY - (130 + Math.random() * 100);
+
+    platforms.push({ x: nextX, y: nextY, w: w, h: 45, type: type, metal: new Array(15).fill(0) });
+    if(Math.random() > 0.9) items.push({ x: nextX + w/2, y: nextY - 50, type: 'burger', collected: false });
+    lastPlatY = nextY;
+}
+
+function resetGame() {
+    player.x = canvas.width/2; player.y = 300; player.vx = 0; player.vy = 0;
+    player.radius = player.baseRadius; player.drawSize = player.baseSize; player.sizeTimer = 0;
+    lavaY = canvas.height + 300; maxHeight = 0;
+    platforms = [{ x: -500, y: 550, w: canvas.width + 1000, h: 60, type: 'plat', metal: new Array(20).fill(0) }];
+    items = [];
+    lastPlatY = 550;
+    for(let i=0; i<15; i++) spawnPlatform();
+}
+resetGame();
+
+/* ---------------- PHYSICS ---------------- */
+function update() {
+    if(paused) return;
+    pollGamepad();
+
+    player.vx += (input.left ? -0.8 : 0) + (input.right ? 0.8 : 0);
+    player.vx *= 0.91; player.vy += 0.8;
+    player.onGround = false;
+
+    if(player.sizeTimer > 0) {
+        player.sizeTimer--;
+        player.radius = player.baseRadius * 1.8;
+        player.drawSize = player.baseSize * 1.8;
+    } else {
+        player.radius = player.baseRadius;
+        player.drawSize = player.baseSize;
+    }
+
+    lavaY -= 0.6 + (maxHeight * 0.0012);
+    if(player.y + player.radius > lavaY) resetGame();
+
+    platforms.forEach(p => {
+        if(player.x + player.radius > p.x && player.x - player.radius < p.x + p.w) {
+            let relX = (player.x - p.x) / p.w;
+            let idx = Math.max(0, Math.min(p.metal.length-1, Math.floor(relX * p.metal.length)));
+            let surfaceY = p.y + p.metal[idx];
+
+            if(player.vy >= 0 && player.y + player.radius <= surfaceY + 25 && player.y + player.radius + player.vy >= surfaceY) {
+                if(p.type === 'tramp') {
+                    player.vy = -30; player.jumping = true;
+                } else {
+                    if(player.jumping) {
+                        let force = Math.abs(player.vy) * (player.sizeTimer > 0 ? 1.5 : 1);
+                        for(let i=-2; i<=2; i++) if(p.metal[idx+i] !== undefined) p.metal[idx+i] += force * (1 - Math.abs(i)/3.5);
+                        shake = force * 0.6; player.jumping = false;
+                    }
+                    player.y = surfaceY - player.radius; player.vy = 0; player.onGround = true; player.canDoubleJump = false;
+                }
+            }
+        }
+    });
+
+    items.forEach(it => {
+        if(!it.collected && Math.hypot(player.x - it.x, player.y - it.y) < player.radius + 20) {
+            it.collected = true; player.sizeTimer = 500;
+        }
+    });
+
+    player.x += player.vx; player.y += player.vy;
+    player.rotation += player.vx * (player.sizeTimer > 0 ? 0.02 : 0.05);
+    if(player.x < 0) player.x = canvas.width; if(player.x > canvas.width) player.x = 0;
+    if(player.y < lastPlatY + 800) spawnPlatform();
+
+    let h = Math.max(0, Math.floor(Math.abs(player.y - 550) / 10));
+    if(h > maxHeight) maxHeight = h;
+    document.getElementById("ui").innerText = useAmerican ? `${(maxHeight/11).toFixed(1)} School Buses` : `${maxHeight}m`;
+    if(shake > 0) shake *= 0.85;
+}
+
+function draw() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    let camY = player.y - canvas.height/1.6;
+    ctx.save(); ctx.translate((Math.random()-0.5)*shake, -camY + (Math.random()-0.5)*shake);
+
+    platforms.forEach(p => {
+        ctx.fillStyle = "#5b3b1a"; ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = p.type === 'tramp' ? "#00ffcc" : "#95a5a6";
+        let segW = p.w / p.metal.length;
+        ctx.beginPath(); ctx.moveTo(p.x, p.y + p.h);
+        for(let i=0; i<p.metal.length; i++) {
+            ctx.lineTo(p.x + i*segW, p.y + p.metal[i]);
+            ctx.lineTo(p.x + (i+1)*segW, p.y + p.metal[i]);
+        }
+        ctx.lineTo(p.x + p.w, p.y + p.h); ctx.fill();
+        ctx.strokeStyle = p.type === 'tramp' ? "#fff" : "#bdc3c7";
+        ctx.lineWidth = 3; ctx.beginPath();
+        for(let i=0; i<p.metal.length; i++) ctx.lineTo(p.x + i*segW + segW/2, p.y + p.metal[i]);
+        ctx.stroke();
+    });
+
+    items.forEach(it => { if(!it.collected) { ctx.font = "45px serif"; ctx.fillText("🍔", it.x - 22, it.y + 15); } });
+
+    ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.rotation);
+    if(alex.complete) ctx.drawImage(alex, -player.drawSize/2, -player.drawSize/2, player.drawSize, player.drawSize);
+    else { ctx.fillStyle="#fff"; ctx.fillRect(-player.radius, -player.radius, player.radius*2, player.radius*2); }
+    ctx.restore();
+
+    let grad = ctx.createLinearGradient(0, lavaY, 0, lavaY + 800);
+    grad.addColorStop(0, "rgba(255, 30, 0, 0.95)"); grad.addColorStop(1, "rgba(80, 0, 0, 1)");
+    ctx.fillStyle = grad; ctx.fillRect(-canvas.width, lavaY, canvas.width * 3, 2000);
+    
+    ctx.restore();
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+loop();
+</script>
+</body>
+</html>

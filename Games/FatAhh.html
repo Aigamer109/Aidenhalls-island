@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>FAT ASS</title>
+    <style>
+        body, html {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            background: #000; overflow: hidden;
+            display: flex; justify-content: center; align-items: center;
+        }
+
+        h1 {
+            color: white; font-family: 'Arial Black', sans-serif;
+            position: fixed; top: 40px; z-index: 100;
+            font-size: 4rem; text-shadow: 0 0 20px #000;
+            pointer-events: none;
+        }
+
+        .viewport {
+            position: relative;
+            width: 100vw; height: 100vh;
+            display: flex; justify-content: center; align-items: center;
+        }
+
+        .zoom-layer {
+            position: absolute;
+            width: 100%; height: 100%;
+            display: flex; justify-content: center; align-items: center;
+            will-change: transform;
+        }
+
+        img {
+            max-width: 90%; max-height: 90%;
+            object-fit: contain;
+            image-rendering: -webkit-optimize-contrast;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>ALEX IS FAT</h1>
+
+    <div class="viewport" id="viewport">
+        <div class="zoom-layer" id="layer1"><img src="../Assets/ALEX.png"></div>
+        <div class="zoom-layer" id="layer2"><img src="../Assets/Universe.png"></div>
+        <div class="zoom-layer" id="layer3"><img src="../Assets/Galaxy.png"></div>
+        <div class="zoom-layer" id="layer4"><img src="../Assets/Earth.png"></div>
+        <!-- The Loop Layer: Earth zooms into another Alex -->
+        <div class="zoom-layer" id="layer5"><img src="../Assets/ALEX.png"></div>
+    </div>
+
+    <script>
+        const layers = [
+            document.getElementById('layer1'),
+            document.getElementById('layer2'),
+            document.getElementById('layer3'),
+            document.getElementById('layer4'),
+            document.getElementById('layer5')
+        ];
+
+        let zoom = 1;
+        const zoomSpeed = 1.015; // Tweak this for speed (1.01 = slow, 1.03 = fast)
+        const scaleStep = 25;    // Each image is 1/25th the size of the previous one
+
+        function animate() {
+            zoom *= zoomSpeed;
+
+            // Once we reach the same visual state as the start (Layer 5 fills the screen)
+            // we reset 'zoom' to 1 to loop seamlessly.
+            if (zoom >= Math.pow(scaleStep, 4)) {
+                zoom = 1;
+            }
+
+            layers.forEach((layer, index) => {
+                let currentScale = zoom / Math.pow(scaleStep, index);
+                
+                // Keep layers visible only when they are within a reasonable size range
+                // to optimize rendering performance and prevent blur.
+                if (currentScale < 0.01 || currentScale > 60) {
+                    layer.style.display = "none";
+                } else {
+                    layer.style.display = "flex";
+                    layer.style.transform = `scale(${currentScale})`;
+                    // Optional: fade out images as they zoom past the "camera"
+                    layer.style.opacity = currentScale > 30 ? (60 - currentScale) / 30 : 1;
+                }
+            });
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>

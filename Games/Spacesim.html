@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AHHHHH</title>
+    <style>
+        :root { --bg: #010103; --panel: rgba(10, 10, 25, 0.95); --accent: #4da6ff; }
+        body { margin: 0; background: var(--bg); overflow: hidden; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; user-select: none; }
+        canvas { display: block; filter: contrast(1.1) saturate(1.2); }
+
+        /* UI Panel */
+        #ui-panel { 
+            position: absolute; left: -340px; top: 0; width: 300px; height: 100%; 
+            background: var(--panel); backdrop-filter: blur(15px);
+            border-right: 1px solid #333; padding: 25px; transition: 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+            pointer-events: auto; z-index: 1000; box-shadow: 10px 0 30px rgba(0,0,0,0.5);
+        }
+        #ui-panel.open { left: 0; }
+        .group { margin-bottom: 20px; border-bottom: 1px solid #222; padding-bottom: 15px; }
+        h2 { color: var(--accent); margin-top: 0; font-size: 20px; letter-spacing: 1px; }
+        label { display: block; font-size: 11px; color: #888; text-transform: uppercase; margin-bottom: 6px; }
+        
+        input, select { 
+            width: 100%; background: #111; border: 1px solid #444; color: white; 
+            padding: 10px; border-radius: 5px; outline: none; box-sizing: border-box;
+        }
+        input[type="range"] { padding: 0; height: 5px; margin: 15px 0; }
+        
+        .btn { 
+            background: #222; border: 1px solid #444; color: white; padding: 12px; 
+            width: 100%; cursor: pointer; border-radius: 5px; margin-top: 10px; transition: 0.3s;
+        }
+        .btn:hover { background: #333; border-color: var(--accent); }
+        #clear-btn { background: #400; color: #f88; }
+
+        .hud { 
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); 
+            text-align: center; pointer-events: none; font-size: 12px; opacity: 0.7;
+        }
+        .controls-tip { font-size: 10px; color: #555; margin-top: 20px; line-height: 1.6; }
+        #toast { 
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.8); padding: 10px 20px; border-radius: 20px;
+            font-size: 13px; color: #0f0; display: none; z-index: 2000;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui-panel">
+    <h2>SYSTEM CONTROL</h2>
+    
+    <div class="group">
+        <label>Simulation Speed: <span id="time-label" style="color:white">1.0x</span></label>
+        <input type="range" id="timeScale" min="0.1" max="10" step="0.1" value="1">
+    </div>
+
+    <div class="group">
+        <label>Object Type</label>
+        <select id="objType">
+            <option value="planet">Habitable Planet</option>
+            <option value="star">Stable Sun</option>
+            <option value="blackhole">Singularity</option>
+            <option value="asteroid">Asteroid Belt</option>
+            <option value="cannon">Black Hole Cannon</option>
+        </select>
+    </div>
+
+    <div class="group">
+        <label>Planet Config</label>
+        <div style="display:flex; gap:10px">
+            <div><label>Mass</label><input type="number" id="mass" value="150"></div>
+            <div><label>Radius</label><input type="number" id="radius" value="12"></div>
+        </div>
+    </div>
+
+    <button class="btn" onclick="showTrails = !showTrails">Toggle Orbit Trails</button>
+    <button id="clear-btn" class="btn" onclick="resetSim()">Destroy Universe</button>
+
+    <div class="controls-tip">
+        <b>T</b>: Toggle Panel | <b>Space</b>: Pause<br>
+        <b>WASD</b>: Pan | <b>Q/E</b>: Zoom<br>
+        <b>Auto-Orbit</b>: Drag launch line over Sun.<br>
+        Turns <span style="color:#0f0">GREEN</span> for perfect orbit.
+    </div>
+</div>
+
+<div id="toast">Auto-Orbit Locked</div>
+<div class="hud">Engine v5.0 | Advanced Life & War | Fragments Recombine</div>
+<canvas id="space"></canvas>
+
+<script>
+/**
+ * OMNIVERSE SANDBOX CORE - FULL EDITION
+ */
+
+const canvas = document.getElementById('space');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+// Physics Constants
+const G = 0.8;
+const HAB_INNER = 250;
+const HAB_OUTER = 550;
+const SUBSTEPS = 4; 
+
+let width, height, objects = [], stars = [], keys = {};
+let camera = { x: 0, y: 0, zoom: 1 };
+let isDragging = false, startPos = {}, currentMouse = {};
+let frameCount = 0, isPaused = false, showTrails = true, timeScale = 1;
+
+class SpaceObject {
+    constructor(x, y, vx, vy, mass, radius, color, type = 'planet') {
+        this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+        this.mass = mass; this.radius = radius;
+        this.color = color;
+        this.type = type; // planet, star, blackhole, ship, fragment, missile, cannon
+        this.life = 0;
+        this.age = 0;
+        this.trail = [];
+        this.faction = Math.random() > 0.5 ? 'A' : 'B';
+        this.isFrag = (type === 'fragment' || type === 'missile' || type === 'ship');
+        this.target = null;
+    }
+
+    update() {
+        if (isPaused) return;
+
+        this.age += 1 * timeScale;
+        
+        // --- Evolution Logic ---
+        if (this.type === 'planet') {
+            const sun = objects.find(o => o.type === 'star');
+            if (sun) {
+                const d = Math.sqrt((this.x - sun.x)**2 + (this.y - sun.y)**2);
+                if (d > HAB_INNER && d < HAB_OUTER) {
+                    this.life += 0.25 * timeScale; // Fast Advancement Fix
+                    
+                    // Ship Launch
+                    if (this.life > 300 && Math.random() < 0.005 * timeScale) this.spawnShip();
+                    
+                    // Planetary War
+                    if (this.life > 500 && Math.random() < 0.01 * timeScale) {
+                        const rival = objects.find(o => o.type === 'planet' && o.faction !== this.faction && o.life > 10);
+                        if (rival) this.launchMissile(rival);
+                    }
+                } else {
+                    this.life = Math.max(0, this.life - 0.4 * timeScale);
+                }
+            }
+        }
+
+        // --- Cannon / Ship AI ---
+        if (this.type === 'cannon' || this.type === 'ship' || this.type === 'missile') {
+            if (!this.target || !objects.includes(this.target)) {
+                this.target = objects.find(o => o.type === 'planet' && (this.type === 'ship' ? o.life > 10 : o.faction !== this.faction));
+            }
+            if (this.target) {
+                let dx = this.target.x - this.x, dy = this.target.y - this.y;
+                let d = Math.sqrt(dx*dx + dy*dy);
+                let accel = this.type === 'missile' ? 0.4 : 0.15;
+                this.vx += (dx/d) * accel * timeScale;
+                this.vy += (dy/d) * accel * timeScale;
+                this.vx *= Math.pow(0.97, timeScale);
+                this.vy *= Math.pow(0.97, timeScale);
+            }
+        }
+
+        // --- Star Death ---
+        if (this.type === 'star' && this.age > 100000) this.supernova();
+
+        // --- Trails ---
+        if (showTrails && !this.isFrag && frameCount % 3 === 0) {
+            this.trail.push({x: this.x, y: this.y});
+            if (this.trail.length > 50) this.trail.shift();
+        }
+    }
+
+    spawnShip() {
+        const ang = Math.random() * Math.PI * 2;
+        objects.push(new SpaceObject(this.x, this.y, this.vx + Math.cos(ang)*2, this.vy + Math.sin(ang)*2, 1, 2, '#fff', 'ship'));
+    }
+
+    launchMissile(target) {
+        let m = new SpaceObject(this.x, this.y, this.vx, this.vy, 2, 3, '#ff4444', 'missile');
+        m.target = target;
+        m.faction = this.faction;
+        objects.push(m);
+    }
+
+    supernova() {
+        for(let i=0; i<30; i++) {
+            const ang = Math.random() * Math.PI * 2;
+            const spd = 4 + Math.random() * 6;
+            objects.push(new SpaceObject(this.x, this.y, Math.cos(ang)*spd, Math.sin(ang)*spd, 10, 4, '#ffaa00', 'fragment'));
+        }
+        this.type = 'blackhole'; this.mass *= 5; this.radius = 18; this.color = '#000'; this.age = 0;
+    }
+
+    draw() {
+        const sX = (this.x - camera.x) * camera.zoom + width/2;
+        const sY = (this.y - camera.y) * camera.zoom + height/2;
+        const sR = this.radius * camera.zoom;
+
+        if (sX < -500 || sX > width+500 || sY < -500 || sY > height+500) return;
+
+        // Habitable Zone Overlay
+        if (this.type === 'star') {
+            ctx.beginPath(); 
+            ctx.strokeStyle = 'rgba(0, 255, 100, 0.2)';
+            ctx.lineWidth = 1;
+            ctx.arc(sX, sY, HAB_INNER * camera.zoom, 0, Math.PI*2); ctx.stroke();
+            ctx.arc(sX, sY, HAB_OUTER * camera.zoom, 0, Math.PI*2); ctx.stroke();
+        }
+
+        // Megastructures
+        if (this.type === 'planet' && this.life > 800) {
+            ctx.beginPath(); ctx.strokeStyle = 'rgba(255, 215, 0, 0.5)';
+            ctx.lineWidth = 2 * camera.zoom;
+            ctx.arc(sX, sY, sR * 2.6, 0, Math.PI*2); ctx.stroke();
+        }
+
+        // Body Rendering
+        ctx.beginPath();
+        if (this.type === 'ship') {
+            ctx.fillStyle = '#fff';
+            ctx.moveTo(sX, sY - sR*2); ctx.lineTo(sX - sR, sY + sR); ctx.lineTo(sX + sR, sY + sR);
+        } else if (this.type === 'cannon') {
+            ctx.fillStyle = '#9c27b0'; ctx.arc(sX, sY, sR, 0, Math.PI*2);
+        } else {
+            ctx.arc(sX, sY, sR, 0, Math.PI * 2);
+            let fill = this.color;
+            if (this.type === 'planet') {
+                if (this.life > 100) fill = (this.faction === 'A' ? '#2ecc71' : '#3498db');
+                if (this.life === 0 && this.age > 200) fill = '#555';
+            }
+            ctx.fillStyle = fill;
+        }
+        ctx.fill();
+
+        // Singularities
+        if (this.type === 'blackhole') {
+            ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+            const g = ctx.createRadialGradient(sX, sY, sR, sX, sY, sR*4);
+            g.addColorStop(0, 'rgba(255,255,255,0.1)'); g.addColorStop(1, 'transparent');
+            ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sX, sY, sR*4, 0, Math.PI*2); ctx.fill();
+        }
+
+        // City Lights
+        if (this.life > 400 && this.type === 'planet') {
+            ctx.fillStyle = '#ffeb3b';
+            for(let i=0; i<3; i++) ctx.fillRect(sX + Math.cos(i)*sR*0.6, sY + Math.sin(i)*sR*0.6, 2, 2);
+        }
+
+        // Orbit Trails
+        if (this.trail.length > 1 && showTrails) {
+            ctx.beginPath(); ctx.strokeStyle = this.color + '22';
+            ctx.lineWidth = 1 * camera.zoom;
+            ctx.moveTo((this.trail[0].x - camera.x) * camera.zoom + width/2, (this.trail[0].y - camera.y) * camera.zoom + height/2);
+            for (let p of this.trail) ctx.lineTo((p.x - camera.x) * camera.zoom + width/2, (p.y - camera.y) * camera.zoom + height/2);
+            ctx.stroke();
+        }
+    }
+}
+
+function handlePhysics() {
+    if (isPaused) return;
+
+    const steps = SUBSTEPS;
+    const stepTime = timeScale / steps;
+
+    for (let s = 0; s < steps; s++) {
+        for (let i = 0; i < objects.length; i++) {
+            const a = objects[i];
+            
+            // Step position
+            a.x += a.vx * stepTime;
+            a.y += a.vy * stepTime;
+
+            for (let j = i + 1; j < objects.length; j++) {
+                const b = objects[j];
+                const dx = b.x - a.x, dy = b.y - a.y;
+                const d2 = dx*dx + dy*dy;
+                const d = Math.sqrt(d2);
+
+                // Collision Processing
+                if (d < a.radius + b.radius) {
+                    processCollision(a, b);
+                    continue;
+                }
+
+                // Newtonian Gravity
+                const f = (G * a.mass * b.mass) / d2;
+                const fx = (f * dx / d) * stepTime;
+                const fy = (f * dy / d) * stepTime;
+
+                if (a.type !== 'star' && a.type !== 'blackhole') {
+                    a.vx += fx / a.mass; a.vy += fy / a.mass;
+                }
+                if (b.type !== 'star' && b.type !== 'blackhole') {
+                    b.vx -= fx / b.mass; b.vy -= fy / b.mass;
+                }
+            }
+        }
+    }
+}
+
+function processCollision(a, b) {
+    // Projectile Impact
+    if (a.type === 'missile' || b.type === 'missile') {
+        const p = a.type === 'planet' ? a : (b.type === 'planet' ? b : null);
+        if (p) p.life -= 200;
+        objects.splice(objects.indexOf(a.type === 'missile' ? a : b), 1);
+        return;
+    }
+
+    // Sticky Recombination
+    if (a.type === 'fragment' || b.type === 'fragment') {
+        const parent = a.type !== 'fragment' ? a : b;
+        const child = a === parent ? b : a;
+        parent.mass += child.mass;
+        parent.radius += child.radius * 0.12;
+        objects.splice(objects.indexOf(child), 1);
+        return;
+    }
+
+    // Heavy Consumption
+    const ratio = Math.max(a.mass, b.mass) / Math.min(a.mass, b.mass);
+    if (ratio > 5 || a.type === 'blackhole' || b.type === 'blackhole') {
+        const big = a.mass > b.mass ? a : b;
+        const small = a === big ? b : a;
+        big.mass += small.mass * 0.4;
+        objects.splice(objects.indexOf(small), 1);
+    } else {
+        // Mutual Shattering
+        [a, b].forEach(o => {
+            for(let k=0; k<6; k++) {
+                const ang = Math.random()*Math.PI*2;
+                objects.push(new SpaceObject(o.x, o.y, o.vx + Math.cos(ang)*2, o.vy + Math.sin(ang)*2, o.mass/10, o.radius/3, '#666', 'fragment'));
+            }
+        });
+        objects.splice(objects.indexOf(b), 1);
+        objects.splice(objects.indexOf(a), 1);
+    }
+}
+
+function resetSim() {
+    objects = [];
+    objects.push(new SpaceObject(0, 0, 0, 0, 10000, 32, '#fff1a8', 'star'));
+}
+
+function init() {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+    stars = Array.from({length: 200}, () => ({
+        x: Math.random() * width, y: Math.random() * height, s: Math.random() * 1.5
+    }));
+    resetSim();
+}
+
+function loop() {
+    frameCount++;
+    ctx.fillStyle = '#010104';
+    ctx.fillRect(0, 0, width, height);
+
+    // Stars
+    ctx.fillStyle = '#fff';
+    stars.forEach(s => ctx.fillRect(s.x, s.y, s.s, s.s));
+
+    // Pan/Zoom
+    const spd = 12 / camera.zoom;
+    if (keys['w']) camera.y -= spd; if (keys['s']) camera.y += spd;
+    if (keys['a']) camera.x -= spd; if (keys['d']) camera.x += spd;
+    if (keys['q']) camera.zoom *= 1.03; if (keys['e']) camera.zoom *= 0.97;
+
+    handlePhysics();
+    objects.forEach(o => { o.update(); o.draw(); });
+
+    // Auto-Orbit Trajectory
+    if (isDragging) {
+        const mw = (currentMouse.x - width/2)/camera.zoom + camera.x;
+        const mh = (currentMouse.y - height/2)/camera.zoom + camera.y;
+        const sun = objects.find(o => o.type === 'star');
+        let isOrb = false, orbV = {x:0, y:0};
+
+        if (sun) {
+            const d = Math.sqrt((startPos.wx - sun.x)**2 + (startPos.wy - sun.y)**2);
+            const dToMouse = Math.sqrt((mw - sun.x)**2 + (mh - sun.y)**2);
+            if (dToMouse < 60) {
+                isOrb = true;
+                const v = Math.sqrt(G * sun.mass / d);
+                const ang = Math.atan2(startPos.wy - sun.y, startPos.wx - sun.x) + Math.PI/2;
+                orbV = { x: Math.cos(ang) * v, y: Math.sin(ang) * v };
+                document.getElementById('toast').style.display = 'block';
+            } else {
+                document.getElementById('toast').style.display = 'none';
+            }
+        }
+        
+        ctx.beginPath(); 
+        ctx.strokeStyle = isOrb ? '#0f0' : '#4da6ff';
+        ctx.lineWidth = 2;
+        ctx.moveTo(startPos.sx, startPos.sy); 
+        ctx.lineTo(currentMouse.x, currentMouse.y); 
+        ctx.stroke();
+        startPos.autoV = isOrb ? orbV : null;
+    }
+
+    requestAnimationFrame(loop);
+}
+
+// Controls
+window.onkeydown = (e) => {
+    keys[e.key.toLowerCase()] = true;
+    if (e.key.toLowerCase() === 't') document.getElementById('ui-panel').classList.toggle('open');
+    if (e.key === ' ') isPaused = !isPaused;
+};
+window.onkeyup = (e) => keys[e.key.toLowerCase()] = false;
+
+canvas.onmousedown = (e) => {
+    if (e.button !== 0) return;
+    isDragging = true;
+    startPos = { 
+        sx: e.clientX, sy: e.clientY, 
+        wx: (e.clientX-width/2)/camera.zoom + camera.x, 
+        wy: (e.clientY-height/2)/camera.zoom + camera.y 
+    };
+};
+window.onmousemove = (e) => currentMouse = { x: e.clientX, y: e.clientY };
+window.onmouseup = (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    document.getElementById('toast').style.display = 'none';
+
+    let vx = startPos.autoV ? startPos.autoV.x : (startPos.sx - e.clientX) * 0.04 / camera.zoom;
+    let vy = startPos.autoV ? startPos.autoV.y : (startPos.sy - e.clientY) * 0.04 / camera.zoom;
+    
+    const type = document.getElementById('objType').value;
+    const mass = parseFloat(document.getElementById('mass').value);
+    const rad = parseFloat(document.getElementById('radius').value);
+    
+    if (type === 'asteroid') {
+        for(let i=0; i<8; i++) {
+            objects.push(new SpaceObject(startPos.wx + (Math.random()-0.5)*70, startPos.wy + (Math.random()-0.5)*70, vx, vy, 4, 3, '#777', 'fragment'));
+        }
+    } else {
+        objects.push(new SpaceObject(startPos.wx, startPos.wy, vx, vy, mass, rad, type==='star'?'#fff1a8':'#4da6ff', type));
+    }
+};
+
+document.getElementById('timeScale').oninput = (e) => {
+    timeScale = parseFloat(e.target.value);
+    document.getElementById('time-label').innerText = timeScale.toFixed(1) + 'x';
+};
+
+window.onresize = init;
+init();
+loop();
+</script>
+</body>
+</html>
